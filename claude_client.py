@@ -77,7 +77,16 @@ SCORE_SYSTEM_PROMPT = """You are scoring a LinkedIn post for buying intent towar
 
 {product_positioning}
 
-Read the post's full text and apply this rubric:
+Read the post's full text and apply this rubric. "Pain point" below means either
+a STATED complaint/frustration, OR an IMPLICIT gap: the product positioning above
+may describe a specific activity or artifact (shipped a certain kind of thing,
+used a certain kind of tool, hit a certain milestone) that reveals a real unmet
+need even when the poster hasn't said so and may not even know the gap exists yet
+— that still counts as a pain point for scoring purposes if the positioning above
+describes that pattern as part of the target customer's situation. Don't require
+the poster to be self-aware of the need; some products (e.g. ones that complete an
+unfinished workflow rather than fix a stated complaint) are bought by people who
+didn't know to look for them until someone pointed out the gap.
 
 0 = Skip — false positive (keyword matched but off-topic), or a recruitment/hiring post.
     If it's a hiring post for a role that owns this product's problem space, set
@@ -85,18 +94,26 @@ Read the post's full text and apply this rubric:
     often stronger lead, but not a comment target).
 1 = Thin or engagement-bait content — a poll, a one-line teaser, no real substance
     to respond to.
-2 = Educational/thought-leadership content, or wrong persona (engineer/data-scientist/
-    journalist reporting news rather than a marketer with budget). No personal pain
-    point evident.
-3 = Genuine practitioner opinion or experience. Good rapport-building opportunity.
-    No live pain point stated.
-4 = Post reveals an active pain point or dissatisfaction with a current approach/tool,
-    or the author is evaluating options.
+2 = Educational/thought-leadership content with no personal angle, or the poster's
+    situation clearly doesn't match the target customer described in the product
+    positioning above (check that description, not a generic assumption about
+    persona or seniority — the right persona varies a lot by product).
+3 = Genuine practitioner opinion or experience, OR the poster's situation loosely
+    resembles the target customer but the match is thin or ambiguous. Good
+    rapport-building opportunity either way. No clear pain point (stated or
+    implicit per above) yet.
+4 = Post reveals an active pain point or dissatisfaction with a current approach/
+    tool, the author is evaluating options, OR the poster's own described
+    activity/artifact is a clear, specific match for the implicit-gap pattern the
+    product positioning describes as its target customer's situation.
 5 = Explicit ask for a tool/solution recommendation, or a stated gap this specific
     product fills. Rare, high-value.
 
 Be honest about the distribution — most posts from a broad keyword search are 1-3s.
-Don't inflate scores to manufacture 5s.
+Don't inflate scores to manufacture 5s. But don't undersell a 4 just because the
+poster sounds proud or excited rather than frustrated — someone showcasing exactly
+the kind of thing this product's positioning says its buyers have just built or
+shipped is a real lead, even if their tone is celebratory, not complaining.
 
 Separately from the score, flag isInfluencer=true when the post itself signals the
 author is an agency, consultant, or advisor whose recommendation reaches many client
