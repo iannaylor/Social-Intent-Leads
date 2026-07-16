@@ -55,6 +55,7 @@ def _resolve_company_url(profile_data: dict) -> Optional[str]:
 
 
 async def run_pipeline(profile: dict, run_id: str) -> dict:
+    print(f"[pipeline] run {run_id} starting for profile: {profile}", flush=True)
     product_config = await get_product_config(profile["product"])
 
     icp_titles = (
@@ -101,10 +102,13 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
         "queuedConnect": 0,
     }
 
+    print(f"[pipeline] run {run_id}: connecting to RichAPI...", flush=True)
     async with RichAPIClient() as richapi:
+        print(f"[pipeline] run {run_id}: connected. STEP 2 — searching {len(all_keywords)} keywords", flush=True)
         # ---- STEP 2: search ----
         candidates: dict[str, dict] = {}
-        for kw in all_keywords:
+        for i, kw in enumerate(all_keywords, 1):
+            print(f"[pipeline] run {run_id}: STEP 2 ({i}/{len(all_keywords)}) keyword='{kw}'", flush=True)
             result = await richapi.call(
                 "post_keyword_search",
                 {"keyword": kw, "datePosted": recency, "sort": "DATE_POSTED", "size": 30},
@@ -124,9 +128,11 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
                     "commentary": post.get("commentary") or "",
                 }
         report["candidatesFound"] = len(candidates)
+        print(f"[pipeline] run {run_id}: STEP 2 done — {len(candidates)} unique candidates", flush=True)
 
         # ---- STEP 3: score + influencer flag ----
         cand_list = list(candidates.values())
+        print(f"[pipeline] run {run_id}: STEP 3 — scoring {len(cand_list)} candidates via Claude", flush=True)
         score_results = await _gather_limited(
             [claude_client.score_post(product_config, c["commentary"]) for c in cand_list],
             limit=5,
@@ -153,9 +159,12 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
             else:
                 c["action"], c["connectReason"] = "comment", None
 
+        print(f"[pipeline] run {run_id}: STEP 3 done — {len(survivors)} survived scoring (score > 0)", flush=True)
+
         # ---- STEP 4: ICP qualification ----
         # Personal-buyer candidates (score>=3, not influencer) get the strict
         # title/size check. Influencers bypass it (lightweight sanity check only).
+        print(f"[pipeline] run {run_id}: STEP 4 — ICP qualification", flush=True)
         qualified = []
         for c in survivors:
             needs_icp_check = c["score"] >= 3 and not c.get("isInfluencer")
@@ -190,8 +199,8 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
                     employee_count = company_data.get("employee_count")
                     if isinstance(employee_count, int):
                         size_ok = icp_size_min <= employee_count <= icp_size_max
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[pipeline] run {run_id}: enrich_company failed for {company_url}: {e}", flush=True)
 
             if title_ok or size_ok:
                 qualified.append(c)
@@ -207,8 +216,10 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
 
         qualified.sort(key=_sort_key)
         qualified = qualified[:count_target] if count_target else qualified
+        print(f"[pipeline] run {run_id}: STEP 4 done — {len(qualified)} qualified (capped to count_target={count_target})", flush=True)
 
         # ---- STEP 5: find & verify emails ----
+        print(f"[pipeline] run {run_id}: STEP 5 — emails {'requested' if fetch_emails else 'skipped (not requested)'}", flush=True)
         if fetch_emails and qualified:
             email_targets = []
             for c in qualified:
@@ -258,7 +269,10 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
                             if c["emailStatus"] == "valid":
                                 report["emailsVerified"] += 1
 
+        print(f"[pipeline] run {run_id}: STEP 5 done — {report['emailsFound']} found, {report['emailsVerified']} verified", flush=True)
+
         # ---- STEP 6: draft content ----
+        print(f"[pipeline] run {run_id}: STEP 6 — drafting content for {len(qualified)} candidates via Claude", flush=True)
         draft_results = await _gather_limited(
             [
                 claude_client.draft_content(
@@ -313,6 +327,8 @@ async def run_pipeline(profile: dict, run_id: str) -> dict:
                 }
             )
 
+        print(f"[pipeline] run {run_id}: STEP 6 done. STEP 7 — writing {len(final_items)} items to Airtable", flush=True)
         await airtable_store.upsert_items(final_items, run_id)
+        print(f"[pipeline] run {run_id}: STEP 7 done. Run complete.", flush=True)
 
     return report

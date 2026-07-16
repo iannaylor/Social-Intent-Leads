@@ -24,8 +24,19 @@ same way:
      Headers now go through a caller-supplied httpx.AsyncClient passed as
      `http_client=`. We own that client's lifecycle (create before, close
      after), since the transport won't manage a client it didn't create.
+
+CORRECTED AGAIN after the first two real runs both hung indefinitely at
+"running" with no error and no progress (confirmed via Render's live logs —
+the process was healthy and responding to /health throughout, so this was a
+stuck await, not a crash). No timeout was ever set on the underlying HTTP
+client or on individual tool calls, so a slow or stalled response from
+RichAPI had no ceiling and would hang forever instead of failing loudly.
+Fixed with an explicit httpx timeout plus an asyncio.wait_for() ceiling
+around every tool call, so a stall now surfaces as a clear TimeoutError a
+run can fail on, not a silent hang that burns compute indefinitely.
 """
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -35,6 +46,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 RICHAPI_URL = "https://mcp.richapi.ai/mcp"
+CALL_TIMEOUT_SECONDS = 45
 
 
 class RichAPIClient:
@@ -49,12 +61,15 @@ class RichAPIClient:
         self.session: ClientSession | None = None
 
     async def __aenter__(self) -> "RichAPIClient":
-        self._http_client = httpx.AsyncClient(headers={"x-api-key": self.api_key})
+        self._http_client = httpx.AsyncClient(
+            headers={"x-api-key": self.api_key},
+            timeout=httpx.Timeout(CALL_TIMEOUT_SECONDS, connect=15.0),
+        )
         self._streams_cm = streamable_http_client(RICHAPI_URL, http_client=self._http_client)
         read_stream, write_stream, _get_session_id = await self._streams_cm.__aenter__()
         self._session_cm = ClientSession(read_stream, write_stream)
         self.session = await self._session_cm.__aenter__()
-        await self.session.initialize()
+        await asyncio.wait_for(self.session.initialize(), timeout=CALL_TIMEOUT_SECONDS)
         return self
 
     async def __aexit__(self, *exc_info):
@@ -73,8 +88,17 @@ class RichAPIClient:
         payload just comes back directly, no file juggling needed."""
         if self.session is None:
             raise RuntimeError("RichAPIClient used outside its 'async with' block")
-        result = await self.session.call_tool(tool_name, arguments=arguments)
+        print(f"[richapi] calling {tool_name}...", flush=True)
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool(tool_name, arguments=arguments),
+                timeout=CALL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            print(f"[richapi] {tool_name} TIMED OUT after {CALL_TIMEOUT_SECONDS}s", flush=True)
+            raise
         text = "".join(getattr(block, "text", "") for block in result.content)
+        print(f"[richapi] {tool_name} returned {len(text)} chars", flush=True)
         return json.loads(text)
 
     async def poll(
