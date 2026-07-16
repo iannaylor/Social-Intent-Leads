@@ -109,6 +109,22 @@ async def _fetch_existing_by_post_url() -> dict[str, str]:
     return existing
 
 
+async def get_item_by_post_url(post_url: str) -> Optional[dict]:
+    """Single-record lookup — used by the on-demand 'generate a comment for
+    this skip anyway' override, so it doesn't need to fetch the whole
+    table just to find one record."""
+    filter_formula = f"{{{FIELD_IDS['postUrl']}}} = '{post_url}'"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            AIRTABLE_API_URL,
+            headers=_headers(),
+            params={"filterByFormula": filter_formula, "maxRecords": 1, "returnFieldsByFieldId": "true"},
+        )
+        resp.raise_for_status()
+        records = resp.json().get("records", [])
+        return _record_to_item(records[0]) if records else None
+
+
 async def upsert_items(items: list[dict], run_id: str) -> dict:
     """Create new records for postUrls not already present; leave existing
     records' itemStatus untouched (don't reset someone's in-progress work

@@ -39,6 +39,7 @@ from models import SearchProfile, ProcessBatchRequest
 import pipeline
 import airtable_store
 import products_store
+import claude_client
 
 app = FastAPI(title="Social Intent Leads Backend")
 
@@ -177,6 +178,50 @@ async def set_status(body: dict, authorization: str = Header(default="")):
     if not updated:
         raise HTTPException(status_code=404, detail="No item with that postUrl")
     return {"ok": True}
+
+
+@app.post("/queue/generate-comment")
+async def generate_comment(body: dict, authorization: str = Header(default="")):
+    """On-demand override for a reviewed skip: 'the AI called this off-topic,
+    but I read the post and there's actually something here — draft it
+    anyway.' Synchronous (one Claude call, fast) rather than a background
+    job like scans/batches. Drafts as a plain comment, never comment+connect
+    — an override is a judgment call worth a comment, not automatically a
+    connection request."""
+    require_auth(authorization)
+    post_url = body.get("postUrl")
+    if not post_url:
+        raise HTTPException(status_code=400, detail="postUrl is required")
+
+    item = await airtable_store.get_item_by_post_url(post_url)
+    if not item:
+        raise HTTPException(status_code=404, detail="No item with that postUrl")
+    if not item.get("commentary"):
+        raise HTTPException(
+            status_code=422,
+            detail="No stored post content to draft from (an older record from before this was saved).",
+        )
+
+    product_config = await products_store.get_product_config(item["product"])
+    draft = await claude_client.draft_content(
+        product_config,
+        item["commentary"],
+        item.get("score", 0),
+        item.get("isInfluencer", False),
+        "comment",
+        None,
+    )
+    await airtable_store.update_items(
+        [
+            {
+                "recordId": item["recordId"],
+                "action": "comment",
+                "comment": draft.get("comment"),
+                "skipReason": "",  # explicitly clear — this is no longer a skip
+            }
+        ]
+    )
+    return {"comment": draft.get("comment")}
 
 
 @app.get("/products")
