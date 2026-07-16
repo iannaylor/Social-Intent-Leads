@@ -11,9 +11,15 @@ class SearchProfile(BaseModel):
     companySizeMin: int = 50
     companySizeMax: int = 200
     companyType: str = "SaaS"
+    location: Optional[str] = None  # optional — blank means anywhere
     intentKeywords: str = ""
     recency: Literal["PAST_24H", "PAST_WEEK", "PAST_MONTH"] = "PAST_WEEK"
     fetchEmails: bool = True
+
+
+class ProcessBatchRequest(BaseModel):
+    profile: SearchProfile
+    batchSize: int = 10
 
 
 class QueueItem(BaseModel):

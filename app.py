@@ -2,12 +2,20 @@
 FastAPI app for the hosted social-intent-leads pipeline.
 
 Endpoints:
-  POST /runs              — kick off a pipeline run from a search profile
-  GET  /runs/{run_id}     — poll run status/summary
-  GET  /queue              — fetch all non-done items (what the extension renders)
-  POST /queue/status       — mark an item queued_followup or done
-  GET  /products           — list configured products (name/context/keywords/ICP)
-  POST /products           — create or update a product's context (upsert by key)
+  POST /runs                        — phase 1: search + score every candidate (cheap-ish)
+  POST /runs/{run_id}/process-batch — phase 2: enrich/email/draft the next N pending candidates
+  GET  /runs/{run_id}               — poll run or batch-job status/summary
+  GET  /queue                        — fetch all actionable items (what the extension renders)
+  POST /queue/status                 — mark an item queued_followup or done
+  GET  /products                     — list configured products (name/context/keywords/ICP)
+  POST /products                     — create or update a product's context (upsert by key)
+
+Split into two phases after the first real run processed all 151 candidates
+found (enrichment included) when only 10 were wanted. Phase 1 is always run
+in full — it's just search + Claude scoring, no RichAPI enrichment. Phase 2
+(the expensive part) only runs on a caller-specified batch size at a time,
+via POST /runs/{run_id}/process-batch, callable any time later since the
+pending pool is durable in Airtable, not held in memory.
 
 Auth: simple Bearer token against BACKEND_API_KEYS (comma-separated env var).
 Good enough for a handful of internal users — not meant to scale past that
@@ -27,7 +35,7 @@ import traceback
 from fastapi import FastAPI, Header, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import SearchProfile
+from models import SearchProfile, ProcessBatchRequest
 import pipeline
 import airtable_store
 import products_store
@@ -72,29 +80,71 @@ async def create_run(
     background_tasks: BackgroundTasks,
     authorization: str = Header(default=""),
 ):
+    """Phase 1 only — search + score. Does not enrich, email, or draft
+    anything yet. Call POST /runs/{run_id}/process-batch afterward to
+    actually process candidates, as many or as few at a time as wanted."""
     require_auth(authorization)
     run_id = str(uuid.uuid4())
     RUNS[run_id] = {
         "runId": run_id,
+        "kind": "scan",
         "status": "pending",
         "product": profile.product,
         "createdAt": datetime.datetime.utcnow().isoformat(),
         "error": None,
         "report": None,
     }
-    background_tasks.add_task(_execute_run, run_id, profile.model_dump())
+    background_tasks.add_task(_execute_scan, run_id, profile.model_dump())
     return RUNS[run_id]
 
 
-async def _execute_run(run_id: str, profile: dict):
+async def _execute_scan(run_id: str, profile: dict):
     RUNS[run_id]["status"] = "running"
     try:
-        report = await pipeline.run_pipeline(profile, run_id)
+        report = await pipeline.search_and_score(profile, run_id)
         RUNS[run_id]["status"] = "completed"
         RUNS[run_id]["report"] = report
     except Exception as e:
         RUNS[run_id]["status"] = "failed"
         RUNS[run_id]["error"] = f"{e}\n{traceback.format_exc()}"
+
+
+@app.post("/runs/{run_id}/process-batch")
+async def create_batch(
+    run_id: str,
+    body: ProcessBatchRequest,
+    background_tasks: BackgroundTasks,
+    authorization: str = Header(default=""),
+):
+    """Phase 2 — enrich, email-find, and draft the next `batchSize`
+    highest-priority candidates still sitting in the pending pool for this
+    product. Safe to call repeatedly, any time later — the pool lives in
+    Airtable, not in this process's memory."""
+    require_auth(authorization)
+    batch_id = str(uuid.uuid4())
+    RUNS[batch_id] = {
+        "runId": batch_id,
+        "kind": "batch",
+        "parentRunId": run_id,
+        "status": "pending",
+        "product": body.profile.product,
+        "createdAt": datetime.datetime.utcnow().isoformat(),
+        "error": None,
+        "report": None,
+    }
+    background_tasks.add_task(_execute_batch, batch_id, run_id, body.profile.model_dump(), body.batchSize)
+    return RUNS[batch_id]
+
+
+async def _execute_batch(batch_id: str, run_id: str, profile: dict, batch_size: int):
+    RUNS[batch_id]["status"] = "running"
+    try:
+        report = await pipeline.process_batch(profile, run_id, batch_size)
+        RUNS[batch_id]["status"] = "completed"
+        RUNS[batch_id]["report"] = report
+    except Exception as e:
+        RUNS[batch_id]["status"] = "failed"
+        RUNS[batch_id]["error"] = f"{e}\n{traceback.format_exc()}"
 
 
 @app.get("/runs/{run_id}")
@@ -106,9 +156,13 @@ async def get_run(run_id: str, authorization: str = Header(default="")):
 
 
 @app.get("/queue")
-async def get_queue(product: str | None = None, authorization: str = Header(default="")):
+async def get_queue(
+    product: str | None = None,
+    profileSlug: str | None = None,
+    authorization: str = Header(default=""),
+):
     require_auth(authorization)
-    items = await airtable_store.get_queue(product=product)
+    items = await airtable_store.get_queue(product=product, profile_slug=profileSlug)
     return {"items": items}
 
 
