@@ -11,18 +11,28 @@ MCP client connecting to that same server, calling the same tools
 verify_emails, check_email_finding, check_email_verification, check_usage)
 with the same behavior already verified interactively in this project.
 
-NOTE: this is the one module in this backend that hasn't been exercised
-against the live network from here — the `mcp` package's streamable-HTTP
-client API is written to the documented spec, but should get a smoke test
-(call check_usage and confirm it returns real data) right after first deploy.
+CORRECTED after the first live deploy failed with:
+  ModuleNotFoundError: No module named 'mcp.client.streamable_http'
+That was because requirements.txt had pinned mcp==1.1.2, which predates the
+streamable-HTTP transport module entirely. Fixed by pinning mcp==1.28.1 (the
+current stable release, verified by downloading and inspecting the actual
+wheel rather than guessing) and updating two real API differences found the
+same way:
+  1. The function is `streamable_http_client` (underscore between
+     "streamable" and "http"), not `streamablehttp_client`.
+  2. It no longer takes a `headers` kwarg directly — that's deprecated.
+     Headers now go through a caller-supplied httpx.AsyncClient passed as
+     `http_client=`. We own that client's lifecycle (create before, close
+     after), since the transport won't manage a client it didn't create.
 """
 
 import json
 import os
 from typing import Any
 
+import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 RICHAPI_URL = "https://mcp.richapi.ai/mcp"
 
@@ -33,15 +43,15 @@ class RichAPIClient:
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.environ["RICHAPI_API_KEY"]
+        self._http_client: httpx.AsyncClient | None = None
         self._streams_cm = None
         self._session_cm = None
         self.session: ClientSession | None = None
 
     async def __aenter__(self) -> "RichAPIClient":
-        self._streams_cm = streamablehttp_client(
-            RICHAPI_URL, headers={"x-api-key": self.api_key}
-        )
-        read_stream, write_stream, _ = await self._streams_cm.__aenter__()
+        self._http_client = httpx.AsyncClient(headers={"x-api-key": self.api_key})
+        self._streams_cm = streamable_http_client(RICHAPI_URL, http_client=self._http_client)
+        read_stream, write_stream, _get_session_id = await self._streams_cm.__aenter__()
         self._session_cm = ClientSession(read_stream, write_stream)
         self.session = await self._session_cm.__aenter__()
         await self.session.initialize()
@@ -52,6 +62,8 @@ class RichAPIClient:
             await self._session_cm.__aexit__(*exc_info)
         if self._streams_cm is not None:
             await self._streams_cm.__aexit__(*exc_info)
+        if self._http_client is not None:
+            await self._http_client.aclose()
 
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call an MCP tool and parse its text content block as JSON.
