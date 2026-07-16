@@ -31,16 +31,25 @@ the process was healthy and responding to /health throughout, so this was a
 stuck await, not a crash). No timeout was ever set on the underlying HTTP
 client or on individual tool calls, so a slow or stalled response from
 RichAPI had no ceiling and would hang forever instead of failing loudly.
-Fixed with an explicit httpx timeout plus an asyncio.wait_for() ceiling
-around every tool call, so a stall now surfaces as a clear TimeoutError a
-run can fail on, not a silent hang that burns compute indefinitely.
+First fix attempt used asyncio.wait_for() as the timeout ceiling — WRONG,
+and it caused a new crash on the very next run:
+  RuntimeError: Attempted to exit cancel scope in a different task than it
+  was entered in
+The `mcp` package's streamable_http_client uses anyio's structured
+concurrency internally (anyio.create_task_group()). asyncio.wait_for()
+cancels via raw asyncio task cancellation, which doesn't understand or
+respect anyio's cancel-scope-must-exit-in-the-same-task invariant — mixing
+the two breaks that invariant. The correct fix is anyio.fail_after(), which
+IS anyio's own timeout primitive and composes safely with anyio-based code
+underneath it. Verified locally against the real RichAPI server (a live
+check_usage call, not just an import check) before this was pushed again.
 """
 
-import asyncio
 import json
 import os
 from typing import Any
 
+import anyio
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -69,7 +78,8 @@ class RichAPIClient:
         read_stream, write_stream, _get_session_id = await self._streams_cm.__aenter__()
         self._session_cm = ClientSession(read_stream, write_stream)
         self.session = await self._session_cm.__aenter__()
-        await asyncio.wait_for(self.session.initialize(), timeout=CALL_TIMEOUT_SECONDS)
+        with anyio.fail_after(CALL_TIMEOUT_SECONDS):
+            await self.session.initialize()
         return self
 
     async def __aexit__(self, *exc_info):
@@ -90,11 +100,9 @@ class RichAPIClient:
             raise RuntimeError("RichAPIClient used outside its 'async with' block")
         print(f"[richapi] calling {tool_name}...", flush=True)
         try:
-            result = await asyncio.wait_for(
-                self.session.call_tool(tool_name, arguments=arguments),
-                timeout=CALL_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
+            with anyio.fail_after(CALL_TIMEOUT_SECONDS):
+                result = await self.session.call_tool(tool_name, arguments=arguments)
+        except TimeoutError:
             print(f"[richapi] {tool_name} TIMED OUT after {CALL_TIMEOUT_SECONDS}s", flush=True)
             raise
         text = "".join(getattr(block, "text", "") for block in result.content)
