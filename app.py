@@ -172,6 +172,44 @@ async def get_queue(
     return {"items": items}
 
 
+@app.get("/pending-preview")
+async def pending_preview(product: str, limit: int = 10, authorization: str = Header(default="")):
+    """Free look at the pending_batch pool for a product before spending
+    anything on it — score distribution and the highest-priority items
+    that 'Process next N' would actually pick up. Pure Airtable read (the
+    scores/flags were already set for free during phase 1), so this can be
+    checked as often as wanted before deciding whether processing the next
+    batch is worth it or just more of the same low-priority backlog."""
+    require_auth(authorization)
+    pool = await airtable_store.get_pending_batch(product)
+    score_distribution = {str(i): 0 for i in range(1, 6)}
+    direct_buyer_count = 0
+    influencer_count = 0
+    for item in pool:
+        score = item.get("score")
+        if score in range(1, 6):
+            score_distribution[str(score)] += 1
+        if item.get("connectReason") == "direct-buyer":
+            direct_buyer_count += 1
+        if item.get("isInfluencer"):
+            influencer_count += 1
+    return {
+        "totalPending": len(pool),
+        "scoreDistribution": score_distribution,
+        "directBuyerCount": direct_buyer_count,
+        "influencerCount": influencer_count,
+        "nextBatch": [
+            {
+                "name": item.get("name"),
+                "score": item.get("score"),
+                "isInfluencer": item.get("isInfluencer", False),
+                "connectReason": item.get("connectReason"),
+            }
+            for item in pool[:limit]
+        ],
+    }
+
+
 @app.post("/queue/status")
 async def set_status(body: dict, authorization: str = Header(default="")):
     require_auth(authorization)
