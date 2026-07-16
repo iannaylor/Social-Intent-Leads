@@ -160,7 +160,7 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
             cand["isInfluencer"] = False
             continue
         cand.update(score_result)
-        report["scoreDistribution"][str(cand["score"])] += 1
+        report["scoreDistribution"][str(cand.get("score", 0))] += 1
         if cand.get("isInfluencer"):
             report["influencerFlagged"] += 1
         if cand.get("isHiringSignal"):
@@ -200,10 +200,13 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
     return report
 
 
-async def process_batch(profile: dict, run_id: str, batch_size: int) -> dict:
+async def process_batch(profile: dict, run_id: str, batch_size: int, voice_profile: dict | None = None) -> dict:
     """Phase 2. Pulls the next `batch_size` highest-priority pending_batch
     candidates for this product (optionally scoped to run_id) and runs
-    ICP qualification, email finding, and drafting on just them."""
+    ICP qualification, email finding, and drafting on just them.
+    voice_profile (if given) is the CALLER's own voice/tone brief — applied
+    to every comment they draft, regardless of product, since voice belongs
+    to the person, not the thing being commented about."""
     print(f"[pipeline] run {run_id}: PHASE 2 (batch of {batch_size}) starting", flush=True)
     product_config = await get_product_config(profile["product"])
     icp_titles, icp_size_min, icp_size_max, icp_industries, icp_location = _resolve_icp(profile, product_config)
@@ -395,6 +398,7 @@ async def process_batch(profile: dict, run_id: str, batch_size: int) -> dict:
                     c.get("isInfluencer", False),
                     c["action"],
                     c.get("connectReason"),
+                    voice_profile,
                 )
                 for c in qualified
             ],

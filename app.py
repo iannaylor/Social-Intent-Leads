@@ -40,6 +40,8 @@ import pipeline
 import airtable_store
 import products_store
 import claude_client
+import voice_store
+import voice_generator
 
 app = FastAPI(title="Social Intent Leads Backend")
 
@@ -121,7 +123,8 @@ async def create_batch(
     highest-priority candidates still sitting in the pending pool for this
     product. Safe to call repeatedly, any time later — the pool lives in
     Airtable, not in this process's memory."""
-    require_auth(authorization)
+    api_key = require_auth(authorization)
+    voice_profile = await voice_store.get_voice_profile(api_key)
     batch_id = str(uuid.uuid4())
     RUNS[batch_id] = {
         "runId": batch_id,
@@ -133,14 +136,16 @@ async def create_batch(
         "error": None,
         "report": None,
     }
-    background_tasks.add_task(_execute_batch, batch_id, run_id, body.profile.model_dump(), body.batchSize)
+    background_tasks.add_task(
+        _execute_batch, batch_id, run_id, body.profile.model_dump(), body.batchSize, voice_profile
+    )
     return RUNS[batch_id]
 
 
-async def _execute_batch(batch_id: str, run_id: str, profile: dict, batch_size: int):
+async def _execute_batch(batch_id: str, run_id: str, profile: dict, batch_size: int, voice_profile: dict | None):
     RUNS[batch_id]["status"] = "running"
     try:
-        report = await pipeline.process_batch(profile, run_id, batch_size)
+        report = await pipeline.process_batch(profile, run_id, batch_size, voice_profile)
         RUNS[batch_id]["status"] = "completed"
         RUNS[batch_id]["report"] = report
     except Exception as e:
@@ -188,7 +193,7 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
     job like scans/batches. Drafts as a plain comment, never comment+connect
     — an override is a judgment call worth a comment, not automatically a
     connection request."""
-    require_auth(authorization)
+    api_key = require_auth(authorization)
     post_url = body.get("postUrl")
     if not post_url:
         raise HTTPException(status_code=400, detail="postUrl is required")
@@ -202,6 +207,7 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
             detail="No stored post content to draft from (an older record from before this was saved).",
         )
 
+    voice_profile = await voice_store.get_voice_profile(api_key)
     product_config = await products_store.get_product_config(item["product"])
     draft = await claude_client.draft_content(
         product_config,
@@ -210,6 +216,7 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
         item.get("isInfluencer", False),
         "comment",
         None,
+        voice_profile,
     )
     await airtable_store.update_items(
         [
@@ -222,6 +229,49 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
         ]
     )
     return {"comment": draft.get("comment")}
+
+
+@app.get("/voice")
+async def get_voice(authorization: str = Header(default="")):
+    """Per-user voice/tone profile — keyed by the caller's own API key, not
+    by product. Applied to every comment that user drafts, regardless of
+    which product it's for."""
+    api_key = require_auth(authorization)
+    profile = await voice_store.get_voice_profile(api_key)
+    return profile or {}
+
+
+@app.post("/voice/generate")
+async def generate_voice(body: dict, authorization: str = Header(default="")):
+    """Analyzes the caller's own real LinkedIn posts and drafts a voice
+    brief. Returned for the user to review/edit in Settings before saving
+    — POST /voice persists whatever they approve, not this raw draft."""
+    api_key = require_auth(authorization)
+    linkedin_url = body.get("linkedinUrl")
+    if not linkedin_url:
+        raise HTTPException(status_code=400, detail="linkedinUrl is required")
+    try:
+        result = await voice_generator.generate_voice_brief(linkedin_url)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await voice_store.upsert_voice_profile(
+        api_key, {"linkedinUrl": linkedin_url, "voiceBrief": result["voiceBrief"]}
+    )
+    return result
+
+
+@app.post("/voice")
+async def save_voice(body: dict, authorization: str = Header(default="")):
+    """Saves user-edited voice brief + preferences."""
+    api_key = require_auth(authorization)
+    fields = {
+        k: body.get(k)
+        for k in ("userName", "linkedinUrl", "voiceBrief", "replyLength", "replyStyle")
+        if body.get(k) is not None
+    }
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    return await voice_store.upsert_voice_profile(api_key, fields)
 
 
 @app.get("/products")

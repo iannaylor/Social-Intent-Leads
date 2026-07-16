@@ -146,6 +146,23 @@ If action is "comment" (no connect), leave connectionNote and dmMessage null.
 
 Call submit_draft with your result."""
 
+VOICE_ADDENDUM = """
+
+The person posting this comment has their own writing voice — apply it on top of
+everything above (the em-dash rule and specificity rule still apply regardless):
+{voice_brief}
+{length_line}
+{style_line}"""
+
+LENGTH_LINES = {
+    "short": "Keep it short — a sentence or two, not a paragraph.",
+    "long": "A fuller comment is fine here — two to four sentences.",
+}
+STYLE_LINES = {
+    "casual": "Lean casual — contractions, informal phrasing, like texting a peer.",
+    "professional": "Lean professional — complete sentences, no slang, still human and direct.",
+}
+
 
 async def score_post(product_config: dict, post_text: str) -> dict:
     client = _get_client()
@@ -161,7 +178,18 @@ async def score_post(product_config: dict, post_text: str) -> dict:
         tool_choice={"type": "tool", "name": "submit_score"},
         messages=[{"role": "user", "content": f"Post:\n\n{post_text}"}],
     )
-    return _extract_tool_input(resp, "submit_score")
+    result = _extract_tool_input(resp, "submit_score")
+    # tool_choice forces the model to call submit_score, but doesn't
+    # guarantee every required field actually lands in the input — a
+    # response missing "score" used to crash the whole phase-1 scan with a
+    # bare KeyError, losing every already-scored candidate in the same
+    # batch since the Airtable write only happens once at the end. Raising
+    # here instead turns it into a normal per-candidate scoring failure
+    # (caught by _gather_limited's return_exceptions=True in pipeline.py),
+    # same as any other Claude API error.
+    if not isinstance(result.get("score"), int) or not (0 <= result["score"] <= 5):
+        raise ValueError(f"submit_score returned an invalid score: {result.get('score')!r}")
+    return result
 
 
 async def draft_content(
@@ -171,12 +199,19 @@ async def draft_content(
     is_influencer: bool,
     action: str,
     connect_reason: str | None,
+    voice_profile: dict | None = None,
 ) -> dict:
     client = _get_client()
     system = DRAFT_SYSTEM_PROMPT.format(
         product_name=product_config["name"],
         product_positioning=product_config["positioning"],
     )
+    if voice_profile and voice_profile.get("voiceBrief"):
+        system += VOICE_ADDENDUM.format(
+            voice_brief=voice_profile["voiceBrief"],
+            length_line=LENGTH_LINES.get(voice_profile.get("replyLength"), ""),
+            style_line=STYLE_LINES.get(voice_profile.get("replyStyle"), ""),
+        )
     context = (
         f"Post:\n\n{post_text}\n\n"
         f"Score: {score}\nisInfluencer: {is_influencer}\naction: {action}\n"
