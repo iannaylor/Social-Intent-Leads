@@ -6,6 +6,8 @@ Endpoints:
   GET  /runs/{run_id}     — poll run status/summary
   GET  /queue              — fetch all non-done items (what the extension renders)
   POST /queue/status       — mark an item queued_followup or done
+  GET  /products           — list configured products (name/context/keywords/ICP)
+  POST /products           — create or update a product's context (upsert by key)
 
 Auth: simple Bearer token against BACKEND_API_KEYS (comma-separated env var).
 Good enough for a handful of internal users — not meant to scale past that
@@ -28,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from models import SearchProfile
 import pipeline
 import airtable_store
+import products_store
 
 app = FastAPI(title="Social Intent Leads Backend")
 
@@ -120,3 +123,17 @@ async def set_status(body: dict, authorization: str = Header(default="")):
     if not updated:
         raise HTTPException(status_code=404, detail="No item with that postUrl")
     return {"ok": True}
+
+
+@app.get("/products")
+async def list_products(authorization: str = Header(default="")):
+    require_auth(authorization)
+    return {"products": await products_store.list_products()}
+
+
+@app.post("/products")
+async def upsert_product(body: dict, authorization: str = Header(default="")):
+    require_auth(authorization)
+    if not body.get("key") or not body.get("name"):
+        raise HTTPException(status_code=400, detail="key and name are required")
+    return await products_store.upsert_product(body)

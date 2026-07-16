@@ -22,7 +22,7 @@ from typing import Optional
 
 import claude_client
 import airtable_store
-from product_config import get_product_config
+from products_store import get_product_config
 from richapi_client import RichAPIClient
 
 
@@ -55,7 +55,7 @@ def _resolve_company_url(profile_data: dict) -> Optional[str]:
 
 
 async def run_pipeline(profile: dict, run_id: str) -> dict:
-    product_config = get_product_config(profile["product"])
+    product_config = await get_product_config(profile["product"])
 
     icp_titles = (
         [t.strip() for t in profile["titles"].split(",") if t.strip()]
