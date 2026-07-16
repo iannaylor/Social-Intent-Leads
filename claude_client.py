@@ -107,13 +107,23 @@ didn't know to look for them until someone pointed out the gap.
     activity/artifact is a clear, specific match for the implicit-gap pattern the
     product positioning describes as its target customer's situation.
 5 = Explicit ask for a tool/solution recommendation, or a stated gap this specific
-    product fills. Rare, high-value.
+    product fills in their own words, however that gap is framed. Rare, high-value.
 
 Be honest about the distribution — most posts from a broad keyword search are 1-3s.
-Don't inflate scores to manufacture 5s. But don't undersell a 4 just because the
-poster sounds proud or excited rather than frustrated — someone showcasing exactly
-the kind of thing this product's positioning says its buyers have just built or
-shipped is a real lead, even if their tone is celebratory, not complaining.
+Don't inflate scores to manufacture 5s. But don't undersell a 4 or 5 just because
+of tone or tense:
+- Proud/excited beats frustrated: someone showcasing exactly the kind of thing this
+  product's positioning says its buyers have just built or shipped is a real lead,
+  even celebratory, not complaining.
+- Past tense/resolved beats "must be currently stuck": someone who explicitly
+  names this product's exact problem in their own words — even while giving
+  advice, writing up a lesson learned, or describing how they already worked
+  around it — has still fully articulated the gap. That's a 5 regardless of
+  whether they personally still have the problem right now. A post can say
+  "I just avoided this" or "here's how I dealt with it" and still be the
+  clearest possible statement of the gap this product fills — don't downgrade it
+  to educational/thought-leadership just because it reads as settled rather than
+  urgent.
 
 Separately from the score, flag isInfluencer=true when the post itself signals the
 author is an agency, consultant, or advisor whose recommendation reaches many client
