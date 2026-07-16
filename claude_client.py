@@ -135,6 +135,17 @@ Comment style rules — apply to every comment:
   Generic comments ("Great point!") don't count.
 - Value-add first. The comment should be worth reading even if the reader never
   becomes a lead.
+- If the product positioning above describes an implicit-gap pattern (the poster's
+  own described activity or artifact reveals a need they likely haven't addressed,
+  even though the post itself doesn't complain about it), the comment's question
+  should probe THAT specific gap directly — e.g. for a product that gets web-built
+  apps into app stores, ask whether it's live on the App Store yet or whether push
+  notifications are planned. That reads as genuine curiosity, not a pitch, and is
+  more useful than a generic technical question about how the post's demo was built
+  (how an API integration went, how a sync was implemented) which doesn't move the
+  conversation toward the gap this product actually fills. This applies to the
+  public comment itself, not just the DM — a plausible-sounding question about
+  launch/distribution status doesn't name the product and isn't salesy.
 - Only mention {product_name} by name in the comment if score is 4 (soft, "tools
   exist for this") or 5 (direct, "worth checking out X"). At any other score, or for
   an influencer flagged below score 4, the public comment has NO product mention —
