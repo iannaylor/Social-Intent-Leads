@@ -288,6 +288,20 @@ Rules — same bar as any comment:
   took the time to respond, the follow-up should show you actually read it.
 - Keep it short. A reply is a sentence or two, not a re-pitch of the whole thread.
 - Sound like a real person continuing a conversation, not restarting a script.
+- The whole point of this reply is to keep moving toward finding out whether they
+  have an actual unresolved gap this product fills — not just to keep chatting. The
+  product positioning above usually covers more than one distinct pain point (e.g.
+  submission/distribution, AND push notifications, AND ongoing updates/subscriptions
+  — check what's actually listed). If their reply CONFIRMS one of those points is
+  already handled for them (they state a fact that answers it, e.g. "I already have
+  5 apps live" answers "have you submitted to the App Store yet"), do not keep
+  probing that same confirmed point. Briefly acknowledge what they said, in one
+  clause, then pivot the actual question to a DIFFERENT pain point from the
+  positioning that hasn't been confirmed either way yet. If EVERY distinct pain
+  point this product addresses has now been confirmed as already handled, don't
+  invent a new angle just to keep the thread going — a short genuine reaction with
+  no new question is the honest move, and better than looking like you didn't
+  register what they told you.
 {product_mention_rule}
 Original post: {post_text}
 
