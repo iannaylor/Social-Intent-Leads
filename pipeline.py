@@ -126,10 +126,21 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
         candidates: dict[str, dict] = {}
         for i, kw in enumerate(all_keywords, 1):
             print(f"[pipeline] run {run_id}: STEP 2 ({i}/{len(all_keywords)}) keyword='{kw}'", flush=True)
-            result = await richapi.call(
-                "post_keyword_search",
-                {"keyword": kw, "datePosted": recency, "sort": "DATE_POSTED", "size": 30},
-            )
+            try:
+                result = await richapi.call(
+                    "post_keyword_search",
+                    {"keyword": kw, "datePosted": recency, "sort": "DATE_POSTED", "size": 30},
+                )
+            except Exception as e:
+                # One keyword failing (a transient RichAPI/network hiccup)
+                # used to abort the whole scan, silently discarding every
+                # candidate already found from earlier keywords in this same
+                # loop, since nothing gets written to Airtable until the loop
+                # finishes. Skip just this keyword and keep going instead —
+                # same "don't lose paid work on a partial failure" principle
+                # phase 2's checkpointing already applies.
+                print(f"[pipeline] run {run_id}: keyword '{kw}' search failed, skipping: {e}", flush=True)
+                continue
             for post in result.get("content", []):
                 actor = post.get("actor", {})
                 if actor.get("profileType") == "COMPANY":

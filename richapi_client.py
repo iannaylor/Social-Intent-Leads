@@ -58,6 +58,18 @@ RICHAPI_URL = "https://mcp.richapi.ai/mcp"
 CALL_TIMEOUT_SECONDS = 45
 
 
+def _describe_exception(e: BaseException) -> str:
+    """ExceptionGroup's own str() is just "unhandled errors in a TaskGroup
+    (N sub-exception(s))" — anyio/mcp wrap the actual cause (a dropped
+    connection, a malformed response) inside a TaskGroup internally, and
+    that wrapper text alone is useless for diagnosing what broke. Unwrap
+    recursively to the real leaf exception(s) so logs and the error shown
+    to the user say what actually happened, not just that "something" did."""
+    if isinstance(e, BaseExceptionGroup):
+        return "; ".join(_describe_exception(sub) for sub in e.exceptions)
+    return f"{type(e).__name__}: {e}"
+
+
 class RichAPIClient:
     """Async context manager — reuse one instance for a whole pipeline run
     rather than reconnecting per tool call."""
@@ -105,6 +117,15 @@ class RichAPIClient:
         except TimeoutError:
             print(f"[richapi] {tool_name} TIMED OUT after {CALL_TIMEOUT_SECONDS}s", flush=True)
             raise
+        except Exception as e:
+            # Deliberately `except Exception`, not `BaseException` — a bare
+            # CancelledError (or a BaseExceptionGroup containing one) must
+            # propagate untouched for anyio's structured concurrency to stay
+            # correct; wrapping it here would reintroduce the same class of
+            # cancel-scope bug fixed earlier by switching off asyncio.wait_for.
+            description = _describe_exception(e)
+            print(f"[richapi] {tool_name} failed: {description}", flush=True)
+            raise RuntimeError(f"{tool_name} failed: {description}") from e
         text = "".join(getattr(block, "text", "") for block in result.content)
         print(f"[richapi] {tool_name} returned {len(text)} chars", flush=True)
         return json.loads(text)
