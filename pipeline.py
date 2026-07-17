@@ -206,7 +206,15 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
         )
 
     print(f"[pipeline] run {run_id}: writing {len(final_items)} items to Airtable", flush=True)
-    await airtable_store.upsert_items(final_items, run_id)
+    upsert_result = await airtable_store.upsert_items(final_items, run_id)
+    # candidatesFound is this scan's raw count before checking Airtable —
+    # on a recurring PAST_WEEK search that's often mostly the same posts
+    # re-surfacing. Without splitting out how many were genuinely new vs.
+    # already-seen duplicates, "0 pending, 0 skipped" and "ran fine but
+    # found nothing new today" look identical from the outside — there's
+    # no way to tell a healthy dedup from a search that's silently broken.
+    report["newCount"] = upsert_result["created"]
+    report["duplicateCount"] = upsert_result["skipped_existing"]
     print(f"[pipeline] run {run_id}: PHASE 1 done.", flush=True)
     return report
 
