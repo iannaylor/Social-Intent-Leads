@@ -93,6 +93,28 @@ async def get_product_config(key: str) -> dict:
     )
 
 
+async def infer_product_from_text(text: str) -> Optional[dict]:
+    """Best-effort fallback for content scraped straight off a LinkedIn page
+    with no Airtable record to look up (e.g. a reply on a post that was
+    never scanned, or a stale postUrl format mismatch) — count keyword hits
+    per product and return the best match's config shape, or None if
+    nothing scores above zero. None is a legitimate, expected result: the
+    reply drafter treats it as "draft without product context" rather than
+    guessing wrong, which is safer than mentioning the wrong product."""
+    if not text:
+        return None
+    haystack = text.lower()
+    products = await list_products()
+    best, best_score = None, 0
+    for p in products:
+        config = _to_config_shape(p)
+        keywords = config["broad_keywords"] + config["high_intent_keywords"]
+        score = sum(1 for kw in keywords if kw.lower() in haystack)
+        if score > best_score:
+            best, best_score = config, score
+    return best
+
+
 async def upsert_product(product: dict) -> dict:
     """Create or update by 'key'. product is a dict with the same shape as
     the extension's Products form: key, name, context, broadKeywords,

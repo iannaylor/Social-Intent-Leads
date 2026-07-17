@@ -272,34 +272,45 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
 @app.post("/queue/draft-reply")
 async def draft_reply(body: dict, authorization: str = Header(default="")):
     """Someone replied to a comment already left on their post — the
-    extension's content script detects this on the LinkedIn page itself
-    and sends the scraped reply text here to get a suggested continuation.
-    Never auto-posts anything; this only returns a draft for the human to
-    review, edit, and paste in themselves, same boundary as every other
-    draft in this pipeline."""
+    extension's content script scrapes the original post, our own comment,
+    and their reply directly off the LinkedIn page and sends all three
+    here. postUrl is optional enrichment, not a requirement: if it matches
+    a tracked Airtable record, that record's stored text/product/score are
+    preferred (cleaner, and gives accurate product context); if not, the
+    scraped text alone is enough to draft from, with product identified by
+    best-effort keyword matching (or left out entirely rather than risk
+    naming the wrong one). Never auto-posts anything; this only returns a
+    draft for the human to review, edit, and paste in themselves, same
+    boundary as every other draft in this pipeline."""
     api_key = require_auth(authorization)
     post_url = body.get("postUrl")
     reply_text = body.get("replyText")
-    if not post_url or not reply_text:
-        raise HTTPException(status_code=400, detail="postUrl and replyText are required")
-
-    item = await airtable_store.get_item_by_post_url(post_url)
-    if not item:
-        raise HTTPException(status_code=404, detail="No item with that postUrl")
-    if not item.get("commentary") or not item.get("comment"):
+    post_text = body.get("postText")
+    own_comment = body.get("ownComment")
+    if not reply_text or not (post_text or own_comment):
         raise HTTPException(
-            status_code=422,
-            detail="No stored post content/comment to reply from (an older record from before this was saved).",
+            status_code=400,
+            detail="replyText and at least one of postText/ownComment are required",
         )
 
+    item = await airtable_store.get_item_by_post_url(post_url) if post_url else None
+    if item and item.get("commentary"):
+        post_text = item["commentary"]
+    if item and item.get("comment"):
+        own_comment = item["comment"]
+
     voice_profile = await voice_store.get_voice_profile(api_key)
-    product_config = await products_store.get_product_config(item["product"])
+    if item:
+        product_config = await products_store.get_product_config(item["product"])
+    else:
+        product_config = await products_store.infer_product_from_text(post_text or own_comment or "")
+
     draft = await claude_client.draft_reply(
         product_config,
-        item["commentary"],
-        item["comment"],
+        post_text or "(original post text not available)",
+        own_comment or "(original comment not available)",
         reply_text,
-        item.get("score", 0),
+        item.get("score", 0) if item else 0,
         voice_profile,
     )
     return {"replyText": draft.get("replyText")}

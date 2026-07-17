@@ -276,10 +276,8 @@ async def draft_content(
     return _extract_tool_input(resp, "submit_draft")
 
 
-REPLY_SYSTEM_PROMPT = """You are continuing a LinkedIn comment conversation, for {product_name}.
-
-{product_positioning}
-
+REPLY_SYSTEM_PROMPT = """You are continuing a LinkedIn comment conversation.
+{product_section}
 Context: you (on behalf of the person using this tool) already left a comment on
 someone's post. They've now replied to that comment. Draft a natural, human-sounding
 reply that continues the thread.
@@ -290,14 +288,7 @@ Rules — same bar as any comment:
   took the time to respond, the follow-up should show you actually read it.
 - Keep it short. A reply is a sentence or two, not a re-pitch of the whole thread.
 - Sound like a real person continuing a conversation, not restarting a script.
-- Only mention {product_name} by name if the ORIGINAL score was 4 or 5 AND their
-  reply itself opens the door (asks a question you can answer with it, expresses
-  continued interest, or states the gap more explicitly than before). If their
-  reply is just polite/conversational with no opening, keep building rapport
-  instead, no product mention yet — better to earn a second exchange than force it.
-- If their reply reveals a real objection or reason this product wouldn't fit them,
-  don't paper over it. Acknowledge it honestly rather than pushing past it.
-
+{product_mention_rule}
 Original post: {post_text}
 
 Your prior comment: {own_comment}
@@ -306,9 +297,23 @@ Their reply: {reply_text}
 
 Call submit_reply with your draft."""
 
+# Filled in when a product could be identified (an Airtable match, or a
+# decent keyword-inference score against scraped page text).
+_PRODUCT_SECTION = "\nFor {product_name}:\n\n{product_positioning}\n"
+_PRODUCT_MENTION_RULE = """- Only mention {product_name} by name if the ORIGINAL score was 4 or 5 AND their
+  reply itself opens the door (asks a question you can answer with it, expresses
+  continued interest, or states the gap more explicitly than before). If their
+  reply is just polite/conversational with no opening, keep building rapport
+  instead, no product mention yet — better to earn a second exchange than force it.
+- If their reply reveals a real objection or reason this product wouldn't fit them,
+  don't paper over it. Acknowledge it honestly rather than pushing past it."""
+# No product identified — never guess or mention one. Pure rapport-building
+# continuation is always safe; a wrong product mention is not.
+_NO_PRODUCT_MENTION_RULE = "- No product context is available for this thread — do not name or imply any product. Keep this purely about continuing the conversation and building rapport."
+
 
 async def draft_reply(
-    product_config: dict,
+    product_config: dict | None,
     post_text: str,
     own_comment: str,
     reply_text: str,
@@ -316,9 +321,17 @@ async def draft_reply(
     voice_profile: dict | None = None,
 ) -> dict:
     client = _get_client()
+    if product_config:
+        product_section = _PRODUCT_SECTION.format(
+            product_name=product_config["name"], product_positioning=product_config["positioning"]
+        )
+        product_mention_rule = _PRODUCT_MENTION_RULE.format(product_name=product_config["name"])
+    else:
+        product_section = ""
+        product_mention_rule = _NO_PRODUCT_MENTION_RULE
     system = REPLY_SYSTEM_PROMPT.format(
-        product_name=product_config["name"],
-        product_positioning=product_config["positioning"],
+        product_section=product_section,
+        product_mention_rule=product_mention_rule,
         post_text=post_text,
         own_comment=own_comment,
         reply_text=reply_text,
