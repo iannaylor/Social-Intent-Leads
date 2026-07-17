@@ -53,6 +53,16 @@ SCORE_TOOL = {
     },
 }
 
+REPLY_TOOL = {
+    "name": "submit_reply",
+    "description": "Submit a drafted reply continuing an existing comment thread.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"replyText": {"type": "string"}},
+        "required": ["replyText"],
+    },
+}
+
 DRAFT_TOOL = {
     "name": "submit_draft",
     "description": "Submit the drafted comment and, if applicable, connection note and DM.",
@@ -264,6 +274,70 @@ async def draft_content(
         messages=[{"role": "user", "content": context}],
     )
     return _extract_tool_input(resp, "submit_draft")
+
+
+REPLY_SYSTEM_PROMPT = """You are continuing a LinkedIn comment conversation, for {product_name}.
+
+{product_positioning}
+
+Context: you (on behalf of the person using this tool) already left a comment on
+someone's post. They've now replied to that comment. Draft a natural, human-sounding
+reply that continues the thread.
+
+Rules — same bar as any comment:
+- No em-dashes. Plain commas and full stops.
+- Reference something SPECIFIC from their reply, not just the original post — they
+  took the time to respond, the follow-up should show you actually read it.
+- Keep it short. A reply is a sentence or two, not a re-pitch of the whole thread.
+- Sound like a real person continuing a conversation, not restarting a script.
+- Only mention {product_name} by name if the ORIGINAL score was 4 or 5 AND their
+  reply itself opens the door (asks a question you can answer with it, expresses
+  continued interest, or states the gap more explicitly than before). If their
+  reply is just polite/conversational with no opening, keep building rapport
+  instead, no product mention yet — better to earn a second exchange than force it.
+- If their reply reveals a real objection or reason this product wouldn't fit them,
+  don't paper over it. Acknowledge it honestly rather than pushing past it.
+
+Original post: {post_text}
+
+Your prior comment: {own_comment}
+
+Their reply: {reply_text}
+
+Call submit_reply with your draft."""
+
+
+async def draft_reply(
+    product_config: dict,
+    post_text: str,
+    own_comment: str,
+    reply_text: str,
+    score: int,
+    voice_profile: dict | None = None,
+) -> dict:
+    client = _get_client()
+    system = REPLY_SYSTEM_PROMPT.format(
+        product_name=product_config["name"],
+        product_positioning=product_config["positioning"],
+        post_text=post_text,
+        own_comment=own_comment,
+        reply_text=reply_text,
+    )
+    if voice_profile and voice_profile.get("voiceBrief"):
+        system += VOICE_ADDENDUM.format(
+            voice_brief=voice_profile["voiceBrief"],
+            length_line=LENGTH_LINES.get(voice_profile.get("replyLength"), ""),
+            style_line=STYLE_LINES.get(voice_profile.get("replyStyle"), ""),
+        )
+    resp = await client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system=system,
+        tools=[REPLY_TOOL],
+        tool_choice={"type": "tool", "name": "submit_reply"},
+        messages=[{"role": "user", "content": f"Score: {score}"}],
+    )
+    return _extract_tool_input(resp, "submit_reply")
 
 
 def _extract_tool_input(response, tool_name: str) -> dict:

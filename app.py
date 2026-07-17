@@ -269,6 +269,42 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
     return {"comment": draft.get("comment")}
 
 
+@app.post("/queue/draft-reply")
+async def draft_reply(body: dict, authorization: str = Header(default="")):
+    """Someone replied to a comment already left on their post — the
+    extension's content script detects this on the LinkedIn page itself
+    and sends the scraped reply text here to get a suggested continuation.
+    Never auto-posts anything; this only returns a draft for the human to
+    review, edit, and paste in themselves, same boundary as every other
+    draft in this pipeline."""
+    api_key = require_auth(authorization)
+    post_url = body.get("postUrl")
+    reply_text = body.get("replyText")
+    if not post_url or not reply_text:
+        raise HTTPException(status_code=400, detail="postUrl and replyText are required")
+
+    item = await airtable_store.get_item_by_post_url(post_url)
+    if not item:
+        raise HTTPException(status_code=404, detail="No item with that postUrl")
+    if not item.get("commentary") or not item.get("comment"):
+        raise HTTPException(
+            status_code=422,
+            detail="No stored post content/comment to reply from (an older record from before this was saved).",
+        )
+
+    voice_profile = await voice_store.get_voice_profile(api_key)
+    product_config = await products_store.get_product_config(item["product"])
+    draft = await claude_client.draft_reply(
+        product_config,
+        item["commentary"],
+        item["comment"],
+        reply_text,
+        item.get("score", 0),
+        voice_profile,
+    )
+    return {"replyText": draft.get("replyText")}
+
+
 @app.get("/voice")
 async def get_voice(authorization: str = Header(default="")):
     """Per-user voice/tone profile — keyed by the caller's own API key, not
