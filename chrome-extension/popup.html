@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Social Intent Comment Queue</title>
+<style>
+  body { width: 100%; max-width: 480px; min-width: 280px; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 12px; color: #1a1a1a; }
+  h1 { font-size: 14px; margin: 0; }
+  #headerRow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  #settingsGearBtn { background: none; border: none; cursor: pointer; padding: 2px 6px; line-height: 1; display: flex; align-items: center; color: #1a1a1a; }
+  #settingsGearBtn:hover { opacity: 0.7; }
+  #nav { display: flex; gap: 6px; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
+  #nav button { flex: 1; padding: 6px; font-size: 12px; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }
+  #nav button.active { background: #0a66c2; color: white; border-color: #0a66c2; }
+  #progress { font-size: 12px; color: #555; margin-bottom: 10px; }
+  #queueFilterBanner { font-size: 11px; padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; background: #eef2ff; color: #3b4ba8; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #queueFilterBanner button { flex: 0 0 auto; padding: 3px 8px; font-size: 11px; }
+  #name { font-size: 15px; font-weight: 600; margin-bottom: 4px; display: inline-block; }
+  #scoreBadge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+  #influencerBadge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; background: #eee6ff; color: #5b2ba1; }
+  .score-0 { background: #eee; color: #777; }
+  .score-1, .score-2 { background: #eef2ff; color: #3b4ba8; }
+  .score-3 { background: #e6f4ea; color: #1c7a34; }
+  .score-4 { background: #fff4e0; color: #a15c00; }
+  .score-5 { background: #ffe6ea; color: #b8003c; }
+  #skipNote { font-size: 12px; color: #a15c00; background: #fff5e6; border: 1px solid #ffdca0; border-radius: 6px; padding: 8px; margin: 8px 0; }
+  .label { font-size: 11px; font-weight: 600; color: #555; margin: 8px 0 3px; }
+  textarea { width: 100%; height: 80px; box-sizing: border-box; font-size: 13px; padding: 6px; border-radius: 6px; border: 1px solid #ccc; resize: vertical; }
+  textarea.small { height: 50px; }
+  input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px; border-radius: 6px; border: 1px solid #ccc; margin-bottom: 6px; }
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+  .row2 { display: flex; gap: 6px; }
+  .row2 > * { flex: 1; }
+  button { flex: 1; padding: 8px 6px; font-size: 12px; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }
+  button:hover { background: #eaeaea; }
+  button.primary { background: #0a66c2; color: white; border-color: #0a66c2; }
+  button.primary:hover { background: #084d92; }
+  button.danger { color: #b8003c; }
+  #copiedMsg { font-size: 11px; color: #0a7d2c; height: 14px; margin-top: 4px; }
+  #doneScreen { text-align: center; padding: 20px 0; font-size: 14px; }
+  .profileCard { border: 1px solid #ddd; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .profileCard .pname { font-weight: 600; font-size: 13px; }
+  .profileCard .psummary { font-size: 11px; color: #555; margin: 4px 0 4px; line-height: 1.4; }
+  .lastRun { font-size: 11px; color: #888; margin-bottom: 6px; }
+  #replyBanner { background: #fff8e1; border: 1px solid #f0c96a; border-radius: 8px; padding: 10px; margin-bottom: 10px; font-size: 12px; }
+  #replyBanner .replyBannerHeader { font-weight: 600; margin-bottom: 4px; }
+  #replyBanner .replyBannerText { color: #555; margin-bottom: 8px; font-style: italic; }
+  #replyBanner textarea { width: 100%; box-sizing: border-box; min-height: 60px; font-size: 12px; margin-bottom: 6px; }
+  #replyBanner .row { display: flex; gap: 6px; }
+  .lastScanStats { font-size: 11px; color: #888; margin-bottom: 6px; }
+  .pendingPreview { margin-bottom: 6px; }
+  .previewLine { font-size: 11px; color: #666; line-height: 1.4; }
+  .pendingCallout { text-align: left; border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 14px 0; }
+  .pendingCalloutHeader { font-size: 12px; color: #555; margin-bottom: 8px; }
+  .pendingCalloutRow { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 2px; }
+  .pendingCalloutRow button { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
+  .miniStatus { font-size: 11px; min-height: 14px; margin-bottom: 8px; }
+  .iconRow { display: flex; gap: 5px; }
+  .iconBtn { flex: 0 0 auto; width: 34px; height: 34px; font-size: 15px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }
+  .iconBtn:hover { background: #eaeaea; }
+  .iconBtn.primary { background: #0a66c2; border-color: #0a66c2; }
+  .iconBtn.danger:hover { background: #ffe6ea; }
+  .emailLine { font-size: 12px; margin: 6px 0; }
+  .emailLine .status-valid { color: #0a7d2c; font-weight: 600; }
+  .emailLine .status-risky, .emailLine .status-unknown { color: #a15c00; font-weight: 600; }
+  .emailLine .status-invalid { color: #b8003c; font-weight: 600; }
+  .sourceLabel { font-size: 11px; color: #888; margin-bottom: 6px; }
+  .connNoteRef { background: #fafafa; color: #555; }
+  .postLink { font-size: 11px; }
+  .modeNote { font-size: 11px; padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; }
+  .modeNote.cloud { background: #e6f4ea; color: #1c7a34; }
+  .modeNote.local { background: #eef2ff; color: #3b4ba8; }
+  textarea.contextArea { height: 200px; font-size: 12px; }
+  .helpText { font-size: 11px; color: #777; margin: -4px 0 6px; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <div id="headerRow">
+    <h1>Social Intent Comment Queue</h1>
+    <button id="settingsGearBtn" title="Settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
+  <div id="nav">
+    <button id="navQueue" class="active">Queue</button>
+    <button id="navFollowups">Follow-ups</button>
+    <button id="navProfiles">Search</button>
+    <button id="navProducts">Products</button>
+  </div>
+  <div id="replyBanner" style="display:none;"></div>
+  <div id="progress"></div>
+  <div id="content"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

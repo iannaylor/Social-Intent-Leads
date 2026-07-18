@@ -15,5 +15,7 @@ services:
         sync: false
       - key: AIRTABLE_API_KEY
         sync: false
+      - key: AIRTABLE_BASE_ID
+        sync: false
       - key: BACKEND_API_KEYS
         sync: false

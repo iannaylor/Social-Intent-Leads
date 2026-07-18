@@ -1,48 +1,48 @@
 """
 Airtable-backed product context — replaces the earlier hardcoded
-product_config.py dict. A product's positioning, keywords, and ICP live in
-the "Social Intent Products" table (base appIvaVZZwTj8xr0F, table
-tblAP6BukAjMrMh4Z) instead of Python, so a new product can be added or an
-existing one refined entirely from the extension's Products tab — no code
-change or redeploy needed.
+product_config.py dict. A product's positioning, keywords, and ICP live
+in the "Social Intent Products" table (auto-created in whatever base
+AIRTABLE_BASE_ID points at, see airtable_setup.py) instead of Python, so
+a new product can be added or an existing one refined entirely from the
+extension's Products tab — no code change or redeploy needed.
 """
 
-import os
 from typing import Optional
 
 import httpx
 
-BASE_ID = "appIvaVZZwTj8xr0F"
-TABLE_ID = "tblAP6BukAjMrMh4Z"
-AIRTABLE_API_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}"
+import airtable_setup
 
-FIELD_IDS = {
-    "key": "fldYGRKEO0WUpQ6Ue",
-    "name": "fldkW7AFdEfqeZiQH",
-    "context": "fldtfsIsvtSoFVcsz",
-    "broadKeywords": "fldvxHA7m8V2050zg",
-    "highIntentKeywords": "fldTJXgm7kMMb17kK",
-    "icpTitles": "fldR0F7QLaTjnsvbh",
-    "icpCompanySizeMin": "fldPhaMFG33iztqjT",
-    "icpCompanySizeMax": "fldgQwiZDmzoRhMsz",
-    "icpIndustries": "fld2P6xA0NqBdcAZQ",
+TABLE_NAME = airtable_setup.PRODUCTS_TABLE
+
+FIELD_NAMES = {
+    "key": "Key",
+    "name": "Name",
+    "context": "Context",
+    "broadKeywords": "Broad Keywords",
+    "highIntentKeywords": "High Intent Keywords",
+    "icpTitles": "ICP Titles",
+    "icpCompanySizeMin": "ICP Company Size Min",
+    "icpCompanySizeMax": "ICP Company Size Max",
+    "icpIndustries": "ICP Industries",
 }
-REVERSE_FIELD_IDS = {v: k for k, v in FIELD_IDS.items()}
+
+
+def _url() -> str:
+    return airtable_setup.table_url(TABLE_NAME)
 
 
 def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.environ['AIRTABLE_API_KEY']}",
-        "Content-Type": "application/json",
-    }
+    return airtable_setup.headers()
 
 
 def _record_to_product(record: dict) -> dict:
     product = {"recordId": record["id"]}
-    for field_id, value in record.get("fields", {}).items():
-        key = REVERSE_FIELD_IDS.get(field_id)
-        if key:
-            product[key] = value
+    for field_name, value in record.get("fields", {}).items():
+        for key, name in FIELD_NAMES.items():
+            if name == field_name:
+                product[key] = value
+                break
     return product
 
 
@@ -66,10 +66,10 @@ async def list_products() -> list[dict]:
     offset = None
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
-            params = {"pageSize": "100", "returnFieldsByFieldId": "true"}
+            params = {"pageSize": "100"}
             if offset:
                 params["offset"] = offset
-            resp = await client.get(AIRTABLE_API_URL, headers=_headers(), params=params)
+            resp = await client.get(_url(), headers=_headers(), params=params)
             resp.raise_for_status()
             data = resp.json()
             products.extend(_record_to_product(r) for r in data.get("records", []))
@@ -124,20 +124,20 @@ async def upsert_product(product: dict) -> dict:
     match = next((p for p in existing if p.get("key") == product["key"]), None)
 
     fields = {}
-    for k, field_id in FIELD_IDS.items():
+    for k, field_name in FIELD_NAMES.items():
         if k in product and product[k] is not None:
-            fields[field_id] = product[k]
+            fields[field_name] = product[k]
 
     async with httpx.AsyncClient(timeout=30) as client:
         if match:
             resp = await client.patch(
-                f"{AIRTABLE_API_URL}/{match['recordId']}",
+                f"{_url()}/{match['recordId']}",
                 headers=_headers(),
-                json={"fields": fields},
+                json={"fields": fields, "typecast": True},
             )
         else:
             resp = await client.post(
-                AIRTABLE_API_URL, headers=_headers(), json={"fields": fields}
+                _url(), headers=_headers(), json={"fields": fields, "typecast": True}
             )
         resp.raise_for_status()
         return _record_to_product(resp.json())

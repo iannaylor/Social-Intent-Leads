@@ -1,9 +1,14 @@
 """
 Airtable storage layer for the Social Intent Leads table.
 
-Table: base appIvaVZZwTj8xr0F ("Content Pipeline" base already used by every
-other skill in this workspace), table tblYlMKksVwVfVxx4 ("Social Intent
-Leads"), created for this project.
+Table lives in whatever base AIRTABLE_BASE_ID points at — auto-created
+there (see airtable_setup.py) if a table by this name doesn't exist yet,
+so a fresh deploy against an empty base works without any manual Airtable
+setup. Fields are addressed by NAME, not Airtable's generated field IDs —
+names are portable across bases (an ID from one base means nothing in
+another), and since this app is the one creating the table in the first
+place, there's no risk of a user renaming a column out from under it the
+way there might be for a hand-built table.
 
 Status is tracked server-side here (not per-browser like the original local
 extension) on purpose: with more than one person potentially working the
@@ -18,68 +23,68 @@ scan). Enrichment/emails/drafting then happen in caller-controlled batches
 against that stored pool, via get_pending_batch()/update_items() below.
 """
 
-import os
 from typing import Optional
 
 import httpx
 
-BASE_ID = "appIvaVZZwTj8xr0F"
-TABLE_ID = "tblYlMKksVwVfVxx4"
-AIRTABLE_API_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}"
+import airtable_setup
 
-FIELD_IDS = {
-    "postUrl": "fldojNUN32gUQGm7N",
-    "name": "fldtqniNQAgeqvbfL",
-    "profileUrl": "fldi9GXmHstrF0p8E",
-    "product": "fldTwS20G2Lo7E3WO",
-    "score": "fldhcYG2qcbqzpfM5",
-    "isInfluencer": "fld33E8YLuYgRF7bP",
-    "connectReason": "fldMxq3QEXiiAftkF",
-    "action": "fldMMA7pHSXqPAfio",
-    "skipReason": "fldEfQUBjbxjw8OB3",
-    "comment": "fld7WZvqLmBwYPBJV",
-    "connectionNote": "fld9nzcMsWqQFLiMv",
-    "dmMessage": "fldiO9rI3R5I5qUAg",
-    "email": "fldlXhZZ25wt2izFF",
-    "emailStatus": "fldu1QynPPE3SfqhQ",
-    "sourceLabel": "fldnVIags6z4RCAJI",
-    "runId": "fldxl2eT5eQOEwcI7",
-    "itemStatus": "fldBTjEfdSpxQk0Eh",
-    "commentary": "fldMPV90LqzD9eoXn",
-    "profileSlug": "fldguRjTkLahqaEts",
+TABLE_NAME = airtable_setup.LEADS_TABLE
+
+FIELD_NAMES = {
+    "postUrl": "Post URL",
+    "name": "Name",
+    "profileUrl": "Profile URL",
+    "product": "Product",
+    "score": "Score",
+    "isInfluencer": "Is Influencer",
+    "connectReason": "Connect Reason",
+    "action": "Action",
+    "skipReason": "Skip Reason",
+    "comment": "Comment",
+    "connectionNote": "Connection Note",
+    "dmMessage": "DM Message",
+    "email": "Email",
+    "emailStatus": "Email Status",
+    "sourceLabel": "Source Label",
+    "runId": "Run ID",
+    "itemStatus": "Item Status",
+    "commentary": "Commentary",
+    "profileSlug": "Profile Slug",
 }
-REVERSE_FIELD_IDS = {v: k for k, v in FIELD_IDS.items()}
+
+
+def _url() -> str:
+    return airtable_setup.table_url(TABLE_NAME)
 
 
 def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.environ['AIRTABLE_API_KEY']}",
-        "Content-Type": "application/json",
-    }
+    return airtable_setup.headers()
 
 
 def _item_to_fields(item: dict, run_id: Optional[str] = None) -> dict:
     fields = {}
-    for key, field_id in FIELD_IDS.items():
+    for key, field_name in FIELD_NAMES.items():
         if key == "runId":
             if run_id is not None:
-                fields[field_id] = run_id
+                fields[field_name] = run_id
             continue
         if key == "itemStatus":
             continue  # lifecycle status — only ever set via set_item_status
         value = item.get(key)
         if value is None:
             continue
-        fields[field_id] = value
+        fields[field_name] = value
     return fields
 
 
 def _record_to_item(record: dict) -> dict:
     item = {"recordId": record["id"]}
-    for field_id, value in record.get("fields", {}).items():
-        key = REVERSE_FIELD_IDS.get(field_id)
-        if key:
-            item[key] = value
+    for field_name, value in record.get("fields", {}).items():
+        for key, name in FIELD_NAMES.items():
+            if name == field_name:
+                item[key] = value
+                break
     return item
 
 
@@ -90,17 +95,16 @@ async def _fetch_existing_by_post_url() -> dict[str, str]:
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
             params = {
-                "fields[]": FIELD_IDS["postUrl"],
+                "fields[]": FIELD_NAMES["postUrl"],
                 "pageSize": "100",
-                "returnFieldsByFieldId": "true",
             }
             if offset:
                 params["offset"] = offset
-            resp = await client.get(AIRTABLE_API_URL, headers=_headers(), params=params)
+            resp = await client.get(_url(), headers=_headers(), params=params)
             resp.raise_for_status()
             data = resp.json()
             for record in data.get("records", []):
-                post_url = record.get("fields", {}).get(FIELD_IDS["postUrl"])
+                post_url = record.get("fields", {}).get(FIELD_NAMES["postUrl"])
                 if post_url:
                     existing[post_url] = record["id"]
             offset = data.get("offset")
@@ -113,12 +117,12 @@ async def get_item_by_post_url(post_url: str) -> Optional[dict]:
     """Single-record lookup — used by the on-demand 'generate a comment for
     this skip anyway' override, so it doesn't need to fetch the whole
     table just to find one record."""
-    filter_formula = f"{{{FIELD_IDS['postUrl']}}} = '{post_url}'"
+    filter_formula = f"{{{FIELD_NAMES['postUrl']}}} = '{post_url}'"
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            AIRTABLE_API_URL,
+            _url(),
             headers=_headers(),
-            params={"filterByFormula": filter_formula, "maxRecords": 1, "returnFieldsByFieldId": "true"},
+            params={"filterByFormula": filter_formula, "maxRecords": 1},
         )
         resp.raise_for_status()
         records = resp.json().get("records", [])
@@ -142,13 +146,13 @@ async def upsert_items(items: list[dict], run_id: str) -> dict:
                 {
                     "fields": {
                         **_item_to_fields(item, run_id),
-                        FIELD_IDS["itemStatus"]: "pending",
+                        FIELD_NAMES["itemStatus"]: "pending",
                     }
                 }
                 for item in batch
             ]
             resp = await client.post(
-                AIRTABLE_API_URL,
+                _url(),
                 headers=_headers(),
                 json={"records": records, "typecast": True},
             )
@@ -175,7 +179,7 @@ async def update_items(items: list[dict]) -> int:
             if not records:
                 continue
             resp = await client.patch(
-                AIRTABLE_API_URL,
+                _url(),
                 headers=_headers(),
                 json={"records": records, "typecast": True},
             )
@@ -196,7 +200,7 @@ async def get_pending_batch(product: str, run_id: Optional[str] = None) -> list[
     logging) — batches work through the whole product's accumulated
     backlog, not just one scan's slice of it. A re-scan later adds to the
     same backlog rather than starting a separate, harder-to-find pool."""
-    filter_formula = f"AND({{{FIELD_IDS['product']}}} = '{product}', {{{FIELD_IDS['action']}}} = 'pending_batch')"
+    filter_formula = f"AND({{{FIELD_NAMES['product']}}} = '{product}', {{{FIELD_NAMES['action']}}} = 'pending_batch')"
 
     records = []
     offset = None
@@ -204,12 +208,11 @@ async def get_pending_batch(product: str, run_id: Optional[str] = None) -> list[
         while True:
             params = {
                 "pageSize": "100",
-                "returnFieldsByFieldId": "true",
                 "filterByFormula": filter_formula,
             }
             if offset:
                 params["offset"] = offset
-            resp = await client.get(AIRTABLE_API_URL, headers=_headers(), params=params)
+            resp = await client.get(_url(), headers=_headers(), params=params)
             resp.raise_for_status()
             data = resp.json()
             records.extend(data.get("records", []))
@@ -241,21 +244,21 @@ async def get_queue(product: Optional[str] = None, profile_slug: Optional[str] =
     auto-resumed."""
     filter_parts = []
     if product:
-        filter_parts.append(f"{{{FIELD_IDS['product']}}} = '{product}'")
+        filter_parts.append(f"{{{FIELD_NAMES['product']}}} = '{product}'")
     if profile_slug:
-        filter_parts.append(f"{{{FIELD_IDS['profileSlug']}}} = '{profile_slug}'")
+        filter_parts.append(f"{{{FIELD_NAMES['profileSlug']}}} = '{profile_slug}'")
     filter_formula = "AND(" + ", ".join(filter_parts) + ")" if filter_parts else None
 
     records = []
     offset = None
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
-            params = {"pageSize": "100", "returnFieldsByFieldId": "true"}
+            params = {"pageSize": "100"}
             if filter_formula:
                 params["filterByFormula"] = filter_formula
             if offset:
                 params["offset"] = offset
-            resp = await client.get(AIRTABLE_API_URL, headers=_headers(), params=params)
+            resp = await client.get(_url(), headers=_headers(), params=params)
             resp.raise_for_status()
             data = resp.json()
             records.extend(data.get("records", []))
@@ -275,9 +278,9 @@ async def set_item_status(post_url: str, status: str) -> bool:
         return False
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.patch(
-            f"{AIRTABLE_API_URL}/{record_id}",
+            f"{_url()}/{record_id}",
             headers=_headers(),
-            json={"fields": {FIELD_IDS["itemStatus"]: status}},
+            json={"fields": {FIELD_NAMES["itemStatus"]: status}},
         )
         resp.raise_for_status()
     return True

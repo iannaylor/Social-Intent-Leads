@@ -42,6 +42,7 @@ import products_store
 import claude_client
 import voice_store
 import voice_generator
+import airtable_setup
 
 app = FastAPI(title="Social Intent Leads Backend")
 
@@ -54,6 +55,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _provision_airtable_tables():
+    """A fresh deploy against a brand new (empty) Airtable base won't have
+    any of the tables this app needs — auto-create them instead of
+    requiring a user to hand-build a schema that was never documented.
+    Logged but not fatal: missing/bad credentials at this point shouldn't
+    take the whole service down (so /health still responds instead of the
+    app failing to boot) — a real request against a missing table will
+    just surface Airtable's own 404 until the env vars are fixed and the
+    service restarts, which re-runs this."""
+    try:
+        await airtable_setup.ensure_table(airtable_setup.LEADS_TABLE, airtable_setup.LEADS_FIELDS)
+        await airtable_setup.ensure_table(airtable_setup.PRODUCTS_TABLE, airtable_setup.PRODUCTS_FIELDS)
+        await airtable_setup.ensure_table(airtable_setup.VOICE_TABLE, airtable_setup.VOICE_FIELDS)
+        print("[app] Airtable tables verified/created", flush=True)
+    except Exception as e:
+        print(f"[app] Airtable table provisioning failed at startup (will retry lazily on first use): {e}", flush=True)
+
 
 RUNS: dict[str, dict] = {}
 
