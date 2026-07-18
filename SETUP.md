@@ -7,6 +7,10 @@ detection, drafting) is preserved because it still calls the Claude API
 directly, using the same rubric as `SKILL.md`, just from server code instead
 of an interactive session.
 
+New to this project? **[socialintent.app](https://socialintent.app/)** has
+a walkthrough of how the whole thing works end to end plus an FAQ — worth a
+read before diving into the steps below.
+
 ## What you'll need before starting
 
 | Secret | Where to get it | Notes |

@@ -1,30 +1,34 @@
-# Social Intent Leads — hosted backend
+# Social Intent Leads — hosted backend + Chrome extension
 
-Hosted version of the `social-intent-leads` Claude Code skill
-(`claude-code/skills/social-intent-leads/SKILL.md` in the main workspace).
-Same pipeline — find LinkedIn posts signaling buying intent, score 0-5,
-flag agency/consultant "influencers," draft comments/connection notes/DMs —
-running as a standalone API so the companion Chrome extension can work
-without a local Claude Code session.
+Find LinkedIn posts signaling buying intent, score 0-5, flag agency/
+consultant "influencers," draft comments/connection notes/DMs/replies —
+a hosted backend (this repo) plus a Chrome extension (`chrome-extension/`,
+also in this repo) that together run standalone, no local Claude Code
+session required.
 
-Judgment calls (scoring, influencer detection, drafting voice) still go
-through the Claude API directly (`claude_client.py`), using the same rubric
-text as `SKILL.md`, so quality doesn't degrade versus the interactive
-version — this is a hosting change, not a logic downgrade.
+📖 **[socialintent.app](https://socialintent.app/)** — how it works, FAQ,
+and setup walkthroughs for both the self-hosted (this repo) and managed
+backend options. Start there if you're new to the project; this repo is
+the code behind it.
+
+Judgment calls (scoring, influencer detection, drafting voice) go through
+the Claude API directly (`claude_client.py`) — quality doesn't trade off
+against being self-hosted.
 
 ## Structure
 
-- `app.py` — FastAPI app: `POST /runs`, `GET /runs/{id}`, `GET /queue`, `POST /queue/status`
-- `pipeline.py` — the STEP 1-8 orchestration, ported from `SKILL.md`
-- `claude_client.py` — Anthropic API calls for scoring/influencer-flagging/drafting
+- `app.py` — FastAPI app: scans, batches, queue, products, voice profiles, reply drafting
+- `pipeline.py` — the two-phase scan/batch orchestration
+- `claude_client.py` — Anthropic API calls for scoring/influencer-flagging/drafting/replies
 - `richapi_client.py` — MCP client for RichAPI (search, enrich, email finding/verification)
-- `airtable_store.py` — reads/writes the `Social Intent Leads` Airtable table
-- `product_config.py` — mirrors `SKILL.md`'s PRODUCT CONFIG table
+- `airtable_store.py` / `products_store.py` / `voice_store.py` — Airtable-backed storage for leads, product config, and per-user voice profiles
+- `airtable_setup.py` — auto-provisions the required Airtable tables in a fresh base on first run
 - `models.py` — Pydantic request/response shapes
+- `chrome-extension/` — the companion Chrome extension (side panel UI, reply/notification detection, live browsing overlay)
 
 ## Deploying
 
-See `SETUP.md` for the full step-by-step (Render + required API keys).
+See `SETUP.md` for the full step-by-step (Render + required API keys + loading the extension).
 
 ## Keeping this in sync with SKILL.md
 
