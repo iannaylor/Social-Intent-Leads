@@ -235,6 +235,7 @@ async def process_batch(
     batch_size: int,
     voice_profile: dict | None = None,
     on_item_authorize=None,
+    on_item_processed=None,
     base_id: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> dict:
@@ -253,6 +254,16 @@ async def process_batch(
     mid-flight. Returning False stops processing the REMAINING candidates
     in this batch (they stay untouched in the pool for next time) without
     touching whatever was already committed for earlier ones.
+
+    on_item_processed (if given): an async callable(candidate_dict) -> None,
+    fired once per candidate right after its final action ("skip",
+    "comment", or "comment+connect") is known, before moving to the next
+    candidate. Exists so a caller can gate on OUTCOME rather than attempt
+    count — e.g. a free plan capped at "10 non-skip results, skips don't
+    count" needs to know how many of the candidates authorized SO FAR
+    actually qualified, which on_item_authorize alone can't tell it (it
+    only runs before the outcome is known). Never affects processing itself
+    — purely observational.
 
     base_id/api_key (if given) target a specific tenant's Airtable base —
     same convention as search_and_score above."""
@@ -302,12 +313,16 @@ async def process_batch(
                 # design (see SKILL.md) — they're not being evaluated as a
                 # personal buyer.
                 c["action"] = "comment+connect"
+                if on_item_processed is not None:
+                    await on_item_processed(c)
                 continue
 
             if not c.get("profileUrl"):
                 c["action"] = "skip"
                 c["skipReason"] = "No LinkedIn profile URL available to verify title/company."
                 report["droppedAtIcp"] += 1
+                if on_item_processed is not None:
+                    await on_item_processed(c)
                 continue
 
             try:
@@ -317,6 +332,8 @@ async def process_batch(
                 c["action"] = "skip"
                 c["skipReason"] = f"Could not verify profile (enrich_profile failed): {e}"
                 report["droppedAtIcp"] += 1
+                if on_item_processed is not None:
+                    await on_item_processed(c)
                 continue
 
             headline = profile_data.get("headline") or ""
@@ -363,6 +380,9 @@ async def process_batch(
                     reason += f" Also outside requested location '{icp_location}' (found: {loc})."
                 c["skipReason"] = reason
                 report["droppedAtIcp"] += 1
+
+            if on_item_processed is not None:
+                await on_item_processed(c)
 
         if on_item_authorize is not None and authorized_count < len(batch):
             # Stopped early — the un-authorized trailing candidates never
