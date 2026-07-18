@@ -442,12 +442,18 @@ function renderQueueFilterBanner() {
 // interrupting active work. Brand's own colors (dark navy + cyan), not the
 // extension's LinkedIn-blue theme, so it reads clearly as "this is from
 // Social Intent" rather than blending in as another app control.
+// Fixed to the bottom of the PANEL viewport (not the end of the content
+// flow) — position:fixed takes it out of normal flow regardless of where
+// it sits in the DOM, so it stays anchored as a footer bar rather than
+// floating wherever the content above it happens to end.
 function _promoBannerHtml() {
   return `
     <a href="https://socialintent.app/" target="_blank" rel="noopener" style="
-      display:block; margin-top:16px; padding:14px 16px; border-radius:10px;
+      position:fixed; bottom:0; left:0; right:0; z-index:100;
+      display:block; padding:12px 16px; box-sizing:border-box;
       background: linear-gradient(135deg, #0a1929 0%, #123049 100%);
-      text-decoration:none; color:#ffffff; box-sizing:border-box;
+      border-top: 2px solid #22d3ee; box-shadow: 0 -2px 10px rgba(0,0,0,0.25);
+      text-decoration:none; color:#ffffff;
     ">
       <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
         <img src="icons/icon32.png" width="20" height="20" style="border-radius:5px; display:block;" />
@@ -475,7 +481,7 @@ function renderQueueDoneScreen() {
 
   getBackendConfig((cfg) => {
     if (!cfg.configured) {
-      contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.<br><button id="resetBtn">Reset progress</button>${_promoBannerHtml()}</div>`;
+      contentEl.innerHTML = `<div id="doneScreen" style="padding-bottom:120px;">That's the whole queue.<br><button id="resetBtn">Reset progress</button></div>${_promoBannerHtml()}`;
       wireReset();
       return;
     }
@@ -530,7 +536,7 @@ function renderQueueDoneScreen() {
         // here made it look like it should un-mark completed items; it
         // silently did nothing. Local mode (above) is the one place it's
         // real, since that's the only mode where status IS local storage.
-        contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.${pendingHtml}<br><div class="helpText">Item status here is shared on the backend, not stored locally — nothing to reset.</div>${_promoBannerHtml()}</div>`;
+        contentEl.innerHTML = `<div id="doneScreen" style="padding-bottom:120px;">That's the whole queue.${pendingHtml}<br><div class="helpText">Item status here is shared on the backend, not stored locally — nothing to reset.</div></div>${_promoBannerHtml()}`;
         contentEl.querySelectorAll(".processFromQueueBtn").forEach((btn) => {
           const slug = btn.dataset.slug;
           const prof = profiles[slug];
