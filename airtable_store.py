@@ -10,6 +10,13 @@ another), and since this app is the one creating the table in the first
 place, there's no risk of a user renaming a column out from under it the
 way there might be for a hand-built table.
 
+Every function accepts optional base_id/api_key overrides — self-hosted
+single-tenant deploys never pass them (falls back to the env vars, exactly
+today's behavior), while the managed multi-tenant backend resolves a
+specific customer's base per request and passes it through explicitly.
+Airtable API key access itself always stays Ian's account either way;
+only the destination base varies per tenant.
+
 Status is tracked server-side here (not per-browser like the original local
 extension) on purpose: with more than one person potentially working the
 same lead pool, "has anyone already actioned this post" needs to be shared,
@@ -54,12 +61,12 @@ FIELD_NAMES = {
 }
 
 
-def _url() -> str:
-    return airtable_setup.table_url(TABLE_NAME)
+def _url(base_id: Optional[str] = None) -> str:
+    return airtable_setup.table_url(TABLE_NAME, base_id)
 
 
-def _headers() -> dict:
-    return airtable_setup.headers()
+def _headers(api_key: Optional[str] = None) -> dict:
+    return airtable_setup.headers(api_key)
 
 
 def _item_to_fields(item: dict, run_id: Optional[str] = None) -> dict:
@@ -88,7 +95,7 @@ def _record_to_item(record: dict) -> dict:
     return item
 
 
-async def _fetch_existing_by_post_url() -> dict[str, str]:
+async def _fetch_existing_by_post_url(base_id: Optional[str] = None, api_key: Optional[str] = None) -> dict[str, str]:
     """Returns {postUrl: recordId} for every existing record, paginated."""
     existing: dict[str, str] = {}
     offset = None
@@ -100,7 +107,7 @@ async def _fetch_existing_by_post_url() -> dict[str, str]:
             }
             if offset:
                 params["offset"] = offset
-            resp = await client.get(_url(), headers=_headers(), params=params)
+            resp = await client.get(_url(base_id), headers=_headers(api_key), params=params)
             resp.raise_for_status()
             data = resp.json()
             for record in data.get("records", []):
@@ -113,15 +120,15 @@ async def _fetch_existing_by_post_url() -> dict[str, str]:
     return existing
 
 
-async def get_item_by_post_url(post_url: str) -> Optional[dict]:
+async def get_item_by_post_url(post_url: str, base_id: Optional[str] = None, api_key: Optional[str] = None) -> Optional[dict]:
     """Single-record lookup — used by the on-demand 'generate a comment for
     this skip anyway' override, so it doesn't need to fetch the whole
     table just to find one record."""
     filter_formula = f"{{{FIELD_NAMES['postUrl']}}} = '{post_url}'"
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            _url(),
-            headers=_headers(),
+            _url(base_id),
+            headers=_headers(api_key),
             params={"filterByFormula": filter_formula, "maxRecords": 1},
         )
         resp.raise_for_status()
@@ -129,13 +136,15 @@ async def get_item_by_post_url(post_url: str) -> Optional[dict]:
         return _record_to_item(records[0]) if records else None
 
 
-async def upsert_items(items: list[dict], run_id: str) -> dict:
+async def upsert_items(
+    items: list[dict], run_id: str, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> dict:
     """Create new records for postUrls not already present; leave existing
     records' itemStatus untouched (don't reset someone's in-progress work
     just because the same post surfaced in a re-run). typecast=True so a
     new Action value (e.g. "pending_batch") doesn't need a manual schema
     change first — Airtable adds it to the single-select's choices."""
-    existing = await _fetch_existing_by_post_url()
+    existing = await _fetch_existing_by_post_url(base_id, api_key)
     to_create = [item for item in items if item["postUrl"] not in existing]
 
     created = 0
@@ -152,8 +161,8 @@ async def upsert_items(items: list[dict], run_id: str) -> dict:
                 for item in batch
             ]
             resp = await client.post(
-                _url(),
-                headers=_headers(),
+                _url(base_id),
+                headers=_headers(api_key),
                 json={"records": records, "typecast": True},
             )
             resp.raise_for_status()
@@ -162,7 +171,7 @@ async def upsert_items(items: list[dict], run_id: str) -> dict:
     return {"created": created, "skipped_existing": len(items) - len(to_create)}
 
 
-async def update_items(items: list[dict]) -> int:
+async def update_items(items: list[dict], base_id: Optional[str] = None, api_key: Optional[str] = None) -> int:
     """Update existing records in place by recordId — used by batch
     processing to turn a 'pending_batch' candidate into a real comment/
     comment+connect/skip once it's been enriched and drafted. Leaves
@@ -179,8 +188,8 @@ async def update_items(items: list[dict]) -> int:
             if not records:
                 continue
             resp = await client.patch(
-                _url(),
-                headers=_headers(),
+                _url(base_id),
+                headers=_headers(api_key),
                 json={"records": records, "typecast": True},
             )
             resp.raise_for_status()
@@ -188,7 +197,9 @@ async def update_items(items: list[dict]) -> int:
     return updated
 
 
-async def get_pending_batch(product: str, run_id: Optional[str] = None) -> list[dict]:
+async def get_pending_batch(
+    product: str, run_id: Optional[str] = None, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> list[dict]:
     """Every not-yet-enriched candidate for this product (optionally scoped
     to one run), sorted highest-priority first: score-5 direct-buyers,
     then influencers, then by score descending. Sorted in Python rather
@@ -212,7 +223,7 @@ async def get_pending_batch(product: str, run_id: Optional[str] = None) -> list[
             }
             if offset:
                 params["offset"] = offset
-            resp = await client.get(_url(), headers=_headers(), params=params)
+            resp = await client.get(_url(base_id), headers=_headers(api_key), params=params)
             resp.raise_for_status()
             data = resp.json()
             records.extend(data.get("records", []))
@@ -232,7 +243,12 @@ async def get_pending_batch(product: str, run_id: Optional[str] = None) -> list[
     return items
 
 
-async def get_queue(product: Optional[str] = None, profile_slug: Optional[str] = None) -> list[dict]:
+async def get_queue(
+    product: Optional[str] = None,
+    profile_slug: Optional[str] = None,
+    base_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> list[dict]:
     """Returns every actionable item. Excludes pending_batch (found and
     scored, not yet enriched/drafted) and enriched_pending_draft (an
     interim checkpoint state — see process_batch in pipeline.py; only
@@ -258,7 +274,7 @@ async def get_queue(product: Optional[str] = None, profile_slug: Optional[str] =
                 params["filterByFormula"] = filter_formula
             if offset:
                 params["offset"] = offset
-            resp = await client.get(_url(), headers=_headers(), params=params)
+            resp = await client.get(_url(base_id), headers=_headers(api_key), params=params)
             resp.raise_for_status()
             data = resp.json()
             records.extend(data.get("records", []))
@@ -270,16 +286,18 @@ async def get_queue(product: Optional[str] = None, profile_slug: Optional[str] =
     return [i for i in items if i.get("action") not in ("pending_batch", "enriched_pending_draft")]
 
 
-async def set_item_status(post_url: str, status: str) -> bool:
+async def set_item_status(
+    post_url: str, status: str, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> bool:
     """Returns False if no record with that postUrl exists."""
-    existing = await _fetch_existing_by_post_url()
+    existing = await _fetch_existing_by_post_url(base_id, api_key)
     record_id = existing.get(post_url)
     if not record_id:
         return False
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.patch(
-            f"{_url()}/{record_id}",
-            headers=_headers(),
+            f"{_url(base_id)}/{record_id}",
+            headers=_headers(api_key),
             json={"fields": {FIELD_NAMES["itemStatus"]: status}},
         )
         resp.raise_for_status()

@@ -84,12 +84,22 @@ def _connect_reason(score: int, is_influencer: bool) -> Optional[str]:
     return None
 
 
-async def search_and_score(profile: dict, run_id: str) -> dict:
+async def search_and_score(
+    profile: dict,
+    run_id: str,
+    base_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> dict:
     """Phase 1. Searches every keyword, scores every candidate found, and
     writes all of them to Airtable — score-0 as a final skip, everyone
-    else as pending_batch, ready for process_batch() whenever."""
+    else as pending_batch, ready for process_batch() whenever.
+
+    base_id/api_key (if given) target a specific tenant's Airtable base —
+    self-hosted single-tenant deploys never pass them (falls back to the
+    env vars, unchanged); the managed multi-tenant backend resolves the
+    calling customer's base per request and passes it through."""
     print(f"[pipeline] run {run_id}: PHASE 1 (search+score) starting for profile: {profile}", flush=True)
-    product_config = await get_product_config(profile["product"])
+    product_config = await get_product_config(profile["product"], base_id, api_key)
 
     extra_keywords = (
         [k.strip() for k in profile["intentKeywords"].split(",") if k.strip()]
@@ -206,7 +216,7 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
         )
 
     print(f"[pipeline] run {run_id}: writing {len(final_items)} items to Airtable", flush=True)
-    upsert_result = await airtable_store.upsert_items(final_items, run_id)
+    upsert_result = await airtable_store.upsert_items(final_items, run_id, base_id, api_key)
     # candidatesFound is this scan's raw count before checking Airtable —
     # on a recurring PAST_WEEK search that's often mostly the same posts
     # re-surfacing. Without splitting out how many were genuinely new vs.
@@ -219,19 +229,39 @@ async def search_and_score(profile: dict, run_id: str) -> dict:
     return report
 
 
-async def process_batch(profile: dict, run_id: str, batch_size: int, voice_profile: dict | None = None) -> dict:
+async def process_batch(
+    profile: dict,
+    run_id: str,
+    batch_size: int,
+    voice_profile: dict | None = None,
+    on_item_authorize=None,
+    base_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> dict:
     """Phase 2. Pulls the next `batch_size` highest-priority pending_batch
     candidates for this product (optionally scoped to run_id) and runs
     ICP qualification, email finding, and drafting on just them.
     voice_profile (if given) is the CALLER's own voice/tone brief — applied
     to every comment they draft, regardless of product, since voice belongs
-    to the person, not the thing being commented about."""
+    to the person, not the thing being commented about.
+
+    on_item_authorize (if given): an async callable(candidate_dict) -> bool,
+    checked before any paid work starts on each candidate — self-hosted
+    single-tenant deploys never pass this (unlimited, as today); the
+    managed multi-tenant backend passes a credit-balance check here so a
+    batch stops cleanly between candidates rather than overdrawing
+    mid-flight. Returning False stops processing the REMAINING candidates
+    in this batch (they stay untouched in the pool for next time) without
+    touching whatever was already committed for earlier ones.
+
+    base_id/api_key (if given) target a specific tenant's Airtable base —
+    same convention as search_and_score above."""
     print(f"[pipeline] run {run_id}: PHASE 2 (batch of {batch_size}) starting", flush=True)
-    product_config = await get_product_config(profile["product"])
+    product_config = await get_product_config(profile["product"], base_id, api_key)
     icp_titles, icp_size_min, icp_size_max, icp_industries, icp_location = _resolve_icp(profile, product_config)
     fetch_emails = profile.get("fetchEmails", True)
 
-    pool = await airtable_store.get_pending_batch(profile["product"], run_id)
+    pool = await airtable_store.get_pending_batch(profile["product"], run_id, base_id, api_key)
     batch = pool[:batch_size]
     remaining_after = max(0, len(pool) - len(batch))
     print(f"[pipeline] run {run_id}: pool has {len(pool)} pending, processing {len(batch)}, {remaining_after} will remain", flush=True)
@@ -255,7 +285,17 @@ async def process_batch(profile: dict, run_id: str, batch_size: int, voice_profi
     async with RichAPIClient() as richapi:
         # ---- ICP qualification ----
         print(f"[pipeline] run {run_id}: STEP 4 — ICP qualification for {len(batch)} candidates", flush=True)
+        authorized_count = 0
         for c in batch:
+            if on_item_authorize is not None and not await on_item_authorize(c):
+                print(
+                    f"[pipeline] run {run_id}: stopping batch early — authorization declined "
+                    f"after {authorized_count} candidate(s)",
+                    flush=True,
+                )
+                break
+            authorized_count += 1
+
             is_influencer_survivor = c.get("connectReason") == "influencer"
             if is_influencer_survivor:
                 # Influencers bypass the strict personal-buyer ICP check by
@@ -323,6 +363,16 @@ async def process_batch(profile: dict, run_id: str, batch_size: int, voice_profi
                     reason += f" Also outside requested location '{icp_location}' (found: {loc})."
                 c["skipReason"] = reason
                 report["droppedAtIcp"] += 1
+
+        if on_item_authorize is not None and authorized_count < len(batch):
+            # Stopped early — the un-authorized trailing candidates never
+            # had any work done on them (the authorize check runs before
+            # anything else in the loop), so they're simply still in the
+            # pool untouched. Drop them from this batch's view entirely so
+            # STEP 5/6 and the write-back below never see them.
+            batch = batch[:authorized_count]
+            report["processed"] = len(batch)
+            report["remainingInPool"] = max(0, len(pool) - len(batch))
 
         qualified = [c for c in batch if c["action"] in ("comment", "comment+connect")]
         print(f"[pipeline] run {run_id}: STEP 4 done — {len(qualified)}/{len(batch)} qualified", flush=True)

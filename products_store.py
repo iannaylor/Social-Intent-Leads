@@ -5,6 +5,10 @@ in the "Social Intent Products" table (auto-created in whatever base
 AIRTABLE_BASE_ID points at, see airtable_setup.py) instead of Python, so
 a new product can be added or an existing one refined entirely from the
 extension's Products tab — no code change or redeploy needed.
+
+Every function accepts optional base_id/api_key overrides — see
+airtable_store.py's module docstring for why (self-hosted vs. managed
+multi-tenant callers).
 """
 
 from typing import Optional
@@ -28,12 +32,12 @@ FIELD_NAMES = {
 }
 
 
-def _url() -> str:
-    return airtable_setup.table_url(TABLE_NAME)
+def _url(base_id: Optional[str] = None) -> str:
+    return airtable_setup.table_url(TABLE_NAME, base_id)
 
 
-def _headers() -> dict:
-    return airtable_setup.headers()
+def _headers(api_key: Optional[str] = None) -> dict:
+    return airtable_setup.headers(api_key)
 
 
 def _record_to_product(record: dict) -> dict:
@@ -61,7 +65,7 @@ def _to_config_shape(product: dict) -> dict:
     }
 
 
-async def list_products() -> list[dict]:
+async def list_products(base_id: Optional[str] = None, api_key: Optional[str] = None) -> list[dict]:
     products = []
     offset = None
     async with httpx.AsyncClient(timeout=30) as client:
@@ -69,7 +73,7 @@ async def list_products() -> list[dict]:
             params = {"pageSize": "100"}
             if offset:
                 params["offset"] = offset
-            resp = await client.get(_url(), headers=_headers(), params=params)
+            resp = await client.get(_url(base_id), headers=_headers(api_key), params=params)
             resp.raise_for_status()
             data = resp.json()
             products.extend(_record_to_product(r) for r in data.get("records", []))
@@ -79,11 +83,11 @@ async def list_products() -> list[dict]:
     return products
 
 
-async def get_product_config(key: str) -> dict:
+async def get_product_config(key: str, base_id: Optional[str] = None, api_key: Optional[str] = None) -> dict:
     """Returns the config shape pipeline.py/claude_client.py expect. Raises
     KeyError with a clear message if the product hasn't been set up yet —
     the fix is adding it via the extension's Products tab, not a code change."""
-    products = await list_products()
+    products = await list_products(base_id, api_key)
     for p in products:
         if p.get("key") == key:
             return _to_config_shape(p)
@@ -93,7 +97,9 @@ async def get_product_config(key: str) -> dict:
     )
 
 
-async def infer_product_from_text(text: str) -> Optional[dict]:
+async def infer_product_from_text(
+    text: str, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> Optional[dict]:
     """Best-effort fallback for content scraped straight off a LinkedIn page
     with no Airtable record to look up (e.g. a reply on a post that was
     never scanned, or a stale postUrl format mismatch) — count keyword hits
@@ -104,7 +110,7 @@ async def infer_product_from_text(text: str) -> Optional[dict]:
     if not text:
         return None
     haystack = text.lower()
-    products = await list_products()
+    products = await list_products(base_id, api_key)
     best, best_score = None, 0
     for p in products:
         config = _to_config_shape(p)
@@ -115,12 +121,12 @@ async def infer_product_from_text(text: str) -> Optional[dict]:
     return best
 
 
-async def upsert_product(product: dict) -> dict:
+async def upsert_product(product: dict, base_id: Optional[str] = None, api_key: Optional[str] = None) -> dict:
     """Create or update by 'key'. product is a dict with the same shape as
     the extension's Products form: key, name, context, broadKeywords,
     highIntentKeywords, icpTitles, icpCompanySizeMin, icpCompanySizeMax,
     icpIndustries."""
-    existing = await list_products()
+    existing = await list_products(base_id, api_key)
     match = next((p for p in existing if p.get("key") == product["key"]), None)
 
     fields = {}
@@ -131,13 +137,13 @@ async def upsert_product(product: dict) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         if match:
             resp = await client.patch(
-                f"{_url()}/{match['recordId']}",
-                headers=_headers(),
+                f"{_url(base_id)}/{match['recordId']}",
+                headers=_headers(api_key),
                 json={"fields": fields, "typecast": True},
             )
         else:
             resp = await client.post(
-                _url(), headers=_headers(), json={"fields": fields, "typecast": True}
+                _url(base_id), headers=_headers(api_key), json={"fields": fields, "typecast": True}
             )
         resp.raise_for_status()
         return _record_to_product(resp.json())
