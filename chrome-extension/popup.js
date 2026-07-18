@@ -107,26 +107,32 @@ function getOwnDisplayName(cb) {
   chrome.storage.local.get(["ownDisplayName"], (r) => cb(r.ownDisplayName || ""));
 }
 
+function getLiveOverlaySetting(cb) {
+  chrome.storage.local.get(["liveOverlayEnabled"], (r) => cb(!!r.liveOverlayEnabled));
+}
+
 function renderSettingsView() {
   progressEl.textContent = "";
   getBackendConfig((cfg) => {
     getAutoSkipSetting((autoSkip) => {
       getOwnDisplayName((ownName) => {
-        const finishRender = (voice) => renderSettingsBody(cfg, autoSkip, voice || {}, ownName);
-        if (cfg.configured) {
-          fetch(`${cfg.url}/voice`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } })
-            .then((r) => (r.ok ? r.json() : {}))
-            .catch(() => ({}))
-            .then(finishRender);
-        } else {
-          finishRender({});
-        }
+        getLiveOverlaySetting((liveOverlay) => {
+          const finishRender = (voice) => renderSettingsBody(cfg, autoSkip, voice || {}, ownName, liveOverlay);
+          if (cfg.configured) {
+            fetch(`${cfg.url}/voice`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } })
+              .then((r) => (r.ok ? r.json() : {}))
+              .catch(() => ({}))
+              .then(finishRender);
+          } else {
+            finishRender({});
+          }
+        });
       });
     });
   });
 }
 
-function renderSettingsBody(cfg, autoSkip, voice, ownName) {
+function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
   contentEl.innerHTML = `
     <div class="label">Your name</div>
     <input type="text" id="fOwnName" placeholder="Exactly as it appears on LinkedIn, e.g. Ian Naylor" value="${ownName || ""}" />
@@ -147,6 +153,15 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName) {
       <button id="saveSettingsBtn" class="primary">Save</button>
     </div>
     <div class="row"><button id="clearSettingsBtn" class="danger">Clear (back to local mode)</button></div>
+
+    ${cfg.configured ? `
+      <div class="label" style="margin-top:16px;">Live browsing overlay</div>
+      <label style="font-size:12px;display:block;margin-bottom:6px;">
+        <input type="checkbox" id="fLiveOverlay" ${liveOverlay ? "checked" : ""} />
+        Highlight posts on LinkedIn (feed, search results, anywhere) that match your products' intent keywords, while you're browsing.
+      </label>
+      <div class="helpText">Off by default — this is a lightweight, free client-side keyword check against posts already on the page, not a full AI score. Turn it on when you're casually browsing and want a quick visual nudge on what might be worth a look; leave it off otherwise so it's not always running in the background.</div>
+    ` : ""}
 
     <div class="label" style="margin-top:16px;">Skip handling</div>
     <label style="font-size:12px;display:block;margin-bottom:6px;">
@@ -221,6 +236,10 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName) {
   };
 
   if (!cfg.configured) return;
+
+  document.getElementById("fLiveOverlay").onchange = (e) => {
+    chrome.storage.local.set({ liveOverlayEnabled: e.target.checked });
+  };
 
   document.getElementById("generateVoiceBtn").onclick = () => {
     const linkedinUrl = document.getElementById("fVoiceLinkedinUrl").value.trim();

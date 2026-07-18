@@ -346,6 +346,107 @@ function _report() {
   }
 }
 
+// ---------- LIVE BROWSING OVERLAY (opt-in, off by default) ----------
+// Highlights posts anywhere on LinkedIn (feed, search results, a
+// profile's activity) that mention one of your products' known intent
+// keywords. Deliberately client-side keyword matching only, not an AI
+// score — free, instant, no per-post backend call while scrolling a
+// feed full of posts. A visual nudge while casually browsing, not a
+// replacement for the scored/drafted pipeline.
+let overlayEnabled = false;
+let cachedProductKeywords = null; // [{name, keywords: [...], highIntentKeywords: [...]}]
+const _overlayMarked = new WeakSet();
+
+function _loadOverlaySettings() {
+  chrome.storage.local.get(["liveOverlayEnabled", "backendUrl", "backendApiKey"], (r) => {
+    overlayEnabled = !!r.liveOverlayEnabled;
+    if (overlayEnabled && r.backendUrl && r.backendApiKey && !cachedProductKeywords) {
+      _fetchProductKeywords(r.backendUrl.replace(/\/+$/, ""), r.backendApiKey);
+    }
+  });
+}
+_loadOverlaySettings();
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && (changes.liveOverlayEnabled || changes.backendUrl || changes.backendApiKey)) {
+    if (changes.backendUrl || changes.backendApiKey) cachedProductKeywords = null; // force a re-fetch
+    _loadOverlaySettings();
+  }
+});
+
+function _fetchProductKeywords(backendUrl, apiKey) {
+  fetch(`${backendUrl}/products`, { headers: { Authorization: `Bearer ${apiKey}` } })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((data) => {
+      const split = (s) => (s || "").split(",").map((k) => k.trim()).filter(Boolean);
+      cachedProductKeywords = (data.products || []).map((p) => ({
+        name: p.name || p.key,
+        highIntentKeywords: split(p.highIntentKeywords),
+        keywords: [...split(p.broadKeywords), ...split(p.highIntentKeywords)],
+      }));
+      log(`overlay: cached keywords for ${cachedProductKeywords.length} product(s)`);
+    })
+    .catch((e) => log("overlay: failed to load product keywords:", e));
+}
+
+function _scanFeedForIntentMatches() {
+  if (!overlayEnabled || !cachedProductKeywords || !cachedProductKeywords.length) return;
+
+  const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
+  const seenActivityIds = new Set();
+
+  postLinks.forEach((link) => {
+    const activityId = _extractActivityId(link.getAttribute("href") || "");
+    if (!activityId || seenActivityIds.has(activityId)) return;
+    seenActivityIds.add(activityId);
+
+    // Climb to a post-card-sized container — same proven technique as
+    // notification cards, just with a bigger target size since a full
+    // feed post's text is longer than a one-line notification.
+    let card = link;
+    let cardText = "";
+    for (let depth = 0; depth < 12 && card.parentElement; depth++) {
+      card = card.parentElement;
+      cardText = _cleanText(card);
+      if (cardText.length > 150) break;
+      if (cardText.length > 4000) return; // climbed too far, bail rather than mismark a huge chunk
+    }
+    if (cardText.length < 50 || _overlayMarked.has(card)) return;
+
+    const haystack = cardText.toLowerCase();
+    let bestMatch = null;
+    for (const product of cachedProductKeywords) {
+      const strongHit = product.highIntentKeywords.find((kw) => haystack.includes(kw.toLowerCase()));
+      const hit = strongHit || product.keywords.find((kw) => haystack.includes(kw.toLowerCase()));
+      if (hit) {
+        bestMatch = { product: product.name, keyword: hit, strong: !!strongHit };
+        if (strongHit) break;
+      }
+    }
+
+    if (bestMatch) {
+      _overlayMarked.add(card);
+      _injectOverlayBadge(card, bestMatch);
+    }
+  });
+}
+
+function _injectOverlayBadge(card, match) {
+  if (getComputedStyle(card).position === "static") card.style.position = "relative";
+  const color = match.strong ? "#d32f2f" : "#0a66c2";
+  const badge = document.createElement("div");
+  badge.textContent = `🎯 ${match.product} — "${match.keyword}"`;
+  badge.title = "Social Intent Comment Queue — client-side keyword match, not a full AI score";
+  badge.style.cssText = `
+    position: absolute; top: 4px; right: 4px; z-index: 9999;
+    background: ${color}; color: white; font-size: 11px; padding: 3px 8px;
+    border-radius: 10px; font-family: -apple-system, sans-serif;
+    pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  `;
+  card.appendChild(badge);
+  card.style.outline = `2px solid ${color}`;
+  card.style.outlineOffset = "2px";
+}
+
 // Debounced re-check on DOM mutation, since comments/replies often load in
 // asynchronously after the initial page paint. On its own this isn't
 // reliable enough for navigation specifically — LinkedIn is a constantly-
@@ -358,9 +459,13 @@ function _report() {
 let debounceTimer = null;
 const observer = new MutationObserver(() => {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(_report, 800);
+  debounceTimer = setTimeout(() => {
+    _report();
+    _scanFeedForIntentMatches();
+  }, 800);
 });
 observer.observe(document.body, { childList: true, subtree: true });
+_scanFeedForIntentMatches();
 
 function _onNavigation(source) {
   log(`navigation detected via ${source}, scheduling re-checks`);
