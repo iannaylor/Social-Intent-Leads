@@ -438,6 +438,31 @@ function renderQueueFilterBanner() {
 // pending_batch backlog sitting unprocessed. Surface it here instead of a
 // dead-end "nothing left" screen, so processing the next batch and
 // getting back to reviewing is one click, not a trip to the Search tab.
+// Shown once the queue's actually empty — a natural break point, not
+// interrupting active work. Brand's own colors (dark navy + cyan), not the
+// extension's LinkedIn-blue theme, so it reads clearly as "this is from
+// Social Intent" rather than blending in as another app control.
+function _promoBannerHtml() {
+  return `
+    <a href="https://socialintent.app/" target="_blank" rel="noopener" style="
+      display:block; margin-top:16px; padding:14px 16px; border-radius:10px;
+      background: linear-gradient(135deg, #0a1929 0%, #123049 100%);
+      text-decoration:none; color:#ffffff; box-sizing:border-box;
+    ">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <img src="icons/icon32.png" width="20" height="20" style="border-radius:5px; display:block;" />
+        <span style="font-weight:600; font-size:13px;">Social Intent</span>
+      </div>
+      <div style="font-size:12px; color:#a9d6e5; line-height:1.4; margin-bottom:10px;">
+        Get tips, best practices, and the full guide to getting the most out of this tool.
+      </div>
+      <span style="display:inline-block; background:#22d3ee; color:#0a1929; font-size:12px; font-weight:600; padding:5px 12px; border-radius:6px;">
+        Visit socialintent.app →
+      </span>
+    </a>
+  `;
+}
+
 function renderQueueDoneScreen() {
   const wireReset = () => {
     document.getElementById("resetBtn").onclick = () => {
@@ -450,7 +475,7 @@ function renderQueueDoneScreen() {
 
   getBackendConfig((cfg) => {
     if (!cfg.configured) {
-      contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.<br><button id="resetBtn">Reset progress</button></div>`;
+      contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.<br><button id="resetBtn">Reset progress</button>${_promoBannerHtml()}</div>`;
       wireReset();
       return;
     }
@@ -505,7 +530,7 @@ function renderQueueDoneScreen() {
         // here made it look like it should un-mark completed items; it
         // silently did nothing. Local mode (above) is the one place it's
         // real, since that's the only mode where status IS local storage.
-        contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.${pendingHtml}<br><div class="helpText">Item status here is shared on the backend, not stored locally — nothing to reset.</div></div>`;
+        contentEl.innerHTML = `<div id="doneScreen">That's the whole queue.${pendingHtml}<br><div class="helpText">Item status here is shared on the backend, not stored locally — nothing to reset.</div>${_promoBannerHtml()}</div>`;
         contentEl.querySelectorAll(".processFromQueueBtn").forEach((btn) => {
           const slug = btn.dataset.slug;
           const prof = profiles[slug];
