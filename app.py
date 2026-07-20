@@ -349,28 +349,29 @@ async def get_voice(authorization: str = Header(default="")):
 
 @app.post("/voice/generate")
 async def generate_voice(body: dict, authorization: str = Header(default="")):
-    """Analyzes the caller's own real LinkedIn posts and drafts a voice
-    brief. Returned for the user to review/edit in Settings before saving
+    """Drafts a voice brief from the caller's own recent post texts,
+    scraped client-side (content.js, via a temporary background tab on
+    their own recent-activity page) and sent directly in the request body
+    — no RichAPI call, no server-side fetch of any kind. linkedinUrl is
+    stored alongside for record-keeping only, not used to fetch anything
+    here. Returned for the user to review/edit in Settings before saving
     — POST /voice persists whatever they approve, not this raw draft."""
     api_key = require_auth(authorization)
     linkedin_url = body.get("linkedinUrl")
+    posts = body.get("posts")
     if not linkedin_url:
         raise HTTPException(status_code=400, detail="linkedinUrl is required")
+    if not posts or not isinstance(posts, list):
+        raise HTTPException(status_code=400, detail="posts (a non-empty array of scraped post texts) is required")
     try:
-        result = await voice_generator.generate_voice_brief(linkedin_url)
+        result = await voice_generator.generate_voice_brief(posts)
     except ValueError as e:
-        # A real, expected-shape failure (no entity URN resolved, no usable
-        # posts) — worth a clear 422 the extension can show as-is.
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        # richapi_client.py raises RuntimeError/TimeoutError on any RichAPI
-        # failure (rate limit, timeout, malformed response) — neither is a
-        # ValueError, so this was previously uncaught here and fell through
-        # to FastAPI's default handler, which returns PLAIN TEXT "Internal
-        # Server Error", not JSON. The extension's JSON.parse() on that
-        # response is exactly the "Unexpected token 'I'" error surfaced in
-        # the UI — the frontend was never wrong, this endpoint just never
-        # gave it JSON to parse in this failure path.
+        # Only the Claude API call can fail here now — RichAPI is out of
+        # the picture entirely — but still worth catching broadly rather
+        # than letting an unexpected failure fall through to FastAPI's
+        # default plain-text 500 (the exact bug just fixed elsewhere).
         raise HTTPException(status_code=502, detail=f"Voice generation failed: {type(e).__name__}: {e}")
     await voice_store.upsert_voice_profile(
         api_key, {"linkedinUrl": linkedin_url, "voiceBrief": result["voiceBrief"]}

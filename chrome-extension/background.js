@@ -100,3 +100,66 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId }).catch((e) => console.error("[social-intent] sidePanel.open failed:", e));
   chrome.tabs.create({ url: LINKEDIN_URL });
 });
+
+// Voice-brief post scraping: popup.js can't scrape posts itself (no DOM
+// access, and the posts live on a page that may not even be open yet) —
+// this opens the user's own recent-activity page in a background tab,
+// asks content.js there to scrape it, and closes the tab when done. Never
+// steals focus (active: false) and never touches whatever tab/panel the
+// user actually has open.
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function _waitForTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error("Timed out waiting for the page to load"));
+    }, timeoutMs);
+    function listener(id, changeInfo) {
+      if (id === tabId && changeInfo.status === "complete") {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+// NEEDS LIVE VERIFICATION — both the recent-activity URL shape (LinkedIn
+// has changed this path before) and the post-load timing below are
+// untested against a real browser.
+function _recentActivityUrl(profileUrl) {
+  return `${profileUrl.replace(/\/+$/, "")}/recent-activity/all/`;
+}
+
+async function _scrapeOwnPostsInBackgroundTab(profileUrl, limit) {
+  const tab = await chrome.tabs.create({ url: _recentActivityUrl(profileUrl), active: false });
+  try {
+    await _waitForTabComplete(tab.id, 15000);
+    // "complete" only means the initial page load finished — LinkedIn's
+    // SPA content (the actual posts) renders in asynchronously after
+    // that, same reasoning as content.js's own staggered _onNavigation
+    // re-checks elsewhere in this codebase. Retry with growing delays
+    // rather than a single fixed wait.
+    for (const delay of [1500, 3000, 5000]) {
+      await _sleep(delay);
+      const resp = await chrome.tabs.sendMessage(tab.id, { type: "SOCIAL_INTENT_SCRAPE_POSTS", limit }).catch(() => null);
+      if (resp && resp.posts && resp.posts.length > 0) return resp.posts;
+    }
+    return [];
+  } finally {
+    chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "SOCIAL_INTENT_SCRAPE_OWN_POSTS") {
+    _scrapeOwnPostsInBackgroundTab(msg.profileUrl, msg.limit || 5)
+      .then((posts) => sendResponse({ ok: true, posts }))
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+    return true; // keep the message channel open for the async response
+  }
+});

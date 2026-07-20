@@ -247,13 +247,26 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
     if (!linkedinUrl) { genMsg.textContent = "Paste your LinkedIn profile URL first."; genMsg.style.color = "#b8003c"; return; }
     const genBtn = document.getElementById("generateVoiceBtn");
     genBtn.disabled = true;
-    genMsg.textContent = "Reading your recent posts…";
+    genMsg.textContent = "Opening your posts in a background tab…";
     genMsg.style.color = "#555";
-    fetch(`${cfg.url}/voice/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ linkedinUrl }),
-    })
+    // Posts are scraped client-side (background.js opens a background tab
+    // on your own recent-activity page, content.js reads what's there,
+    // the tab closes itself) — not fetched via RichAPI. See background.js
+    // for why: no reason to route a read of your OWN posts, from your own
+    // already-logged-in browser, through a third-party API.
+    chrome.runtime.sendMessage({ type: "SOCIAL_INTENT_SCRAPE_OWN_POSTS", profileUrl: linkedinUrl, limit: 5 })
+      .then((resp) => {
+        if (!resp || !resp.ok) throw new Error((resp && resp.error) || "Could not read your posts");
+        if (!resp.posts || !resp.posts.length) {
+          throw new Error("No posts found on your recent activity page — make sure your profile has public posts.");
+        }
+        genMsg.textContent = `Drafting from ${resp.posts.length} post(s)…`;
+        return fetch(`${cfg.url}/voice/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+          body: JSON.stringify({ linkedinUrl, posts: resp.posts }),
+        });
+      })
       .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
       .then((res) => {
         document.getElementById("fVoiceBrief").value = res.voiceBrief || "";
@@ -262,7 +275,7 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
         genBtn.disabled = false;
       })
       .catch((e) => {
-        genMsg.textContent = `Failed: ${e}`;
+        genMsg.textContent = `Failed: ${e.message || e}`;
         genMsg.style.color = "#b8003c";
         genBtn.disabled = false;
       });

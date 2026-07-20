@@ -99,14 +99,15 @@ function _boundedContainer(start, minLen, maxLen, maxDepth) {
 // since LinkedIn's feed post markup varies by post type (text, video,
 // article share). Not required for a reply draft to work (the backend
 // falls back gracefully), just useful extra context when available.
+const _POST_DESCRIPTION_SELECTORS = [
+  ".feed-shared-update-v2__description .break-words",
+  ".feed-shared-text .break-words",
+  ".feed-shared-update-v2__description",
+  "article .break-words",
+];
+
 function _findPostText() {
-  const selectors = [
-    ".feed-shared-update-v2__description .break-words",
-    ".feed-shared-text .break-words",
-    ".feed-shared-update-v2__description",
-    "article .break-words",
-  ];
-  for (const sel of selectors) {
+  for (const sel of _POST_DESCRIPTION_SELECTORS) {
     const el = document.querySelector(sel);
     if (el) {
       const t = _cleanText(el);
@@ -114,6 +115,47 @@ function _findPostText() {
     }
   }
   return null;
+}
+
+// Voice-brief scraping: reads the CALLER's own recent posts directly off
+// their own recent-activity page, in their own already-logged-in browser
+// — deliberately NOT via RichAPI. RichAPI exists to find OTHER people's
+// posts for prospecting; there's no reason to route a read of your OWN
+// posts, while your own browser is already sitting on the page, through a
+// third-party API that can rate-limit or time out. Same post-detection
+// technique as _scanFeedForIntentMatches (post links -> climb to a
+// card-sized container -> dedupe by activity id), just collecting text
+// instead of scanning for keywords, since a recent-activity page is
+// structurally a list of post cards same as the main feed.
+function _scrapeOwnRecentPosts(limit) {
+  const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
+  const seenActivityIds = new Set();
+  const posts = [];
+
+  for (const link of postLinks) {
+    if (posts.length >= limit) break;
+    const activityId = _extractActivityId(link.getAttribute("href") || "");
+    if (!activityId || seenActivityIds.has(activityId)) continue;
+    seenActivityIds.add(activityId);
+
+    let card = link;
+    for (let depth = 0; depth < 12 && card.parentElement; depth++) {
+      card = card.parentElement;
+      if (_cleanText(card).length > 150) break;
+    }
+
+    let text = null;
+    for (const sel of _POST_DESCRIPTION_SELECTORS) {
+      const el = card.querySelector(sel);
+      if (el) {
+        const t = _cleanText(el);
+        if (t.length > 20) { text = t; break; }
+      }
+    }
+    if (text) posts.push(text);
+  }
+  log(`scraped ${posts.length} post(s) for voice brief (from ${postLinks.length} post link(s) on page)`);
+  return posts;
 }
 
 // Our own top-level comment's author name isn't hyperlinked (LinkedIn
@@ -524,6 +566,8 @@ if (chrome.runtime && chrome.runtime.onMessage) {
       _onNavigation("background.js tabs.onUpdated");
     } else if (msg && msg.type === "SOCIAL_INTENT_QUERY_STATE") {
       sendResponse(latestState);
+    } else if (msg && msg.type === "SOCIAL_INTENT_SCRAPE_POSTS") {
+      sendResponse({ posts: _scrapeOwnRecentPosts(msg.limit || 5) });
     }
   });
 }
