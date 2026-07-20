@@ -176,7 +176,7 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
 
       <div class="label">Your LinkedIn profile URL</div>
       <input type="text" id="fVoiceLinkedinUrl" placeholder="https://www.linkedin.com/in/yourname" value="${voice.linkedinUrl || ""}" />
-      <div class="row"><button id="generateVoiceBtn">${ICONS.zap} Scan my posts &amp; draft a brief</button></div>
+      <div class="row"><button id="generateVoiceBtn">${ICONS.zap} Scan my profile &amp; posts, draft a brief</button></div>
       <div id="voiceGenMsg" style="font-size:12px;margin:6px 0;min-height:16px;"></div>
 
       <div class="label">Voice brief</div>

@@ -359,7 +359,19 @@ async def generate_voice(body: dict, authorization: str = Header(default="")):
     try:
         result = await voice_generator.generate_voice_brief(linkedin_url)
     except ValueError as e:
+        # A real, expected-shape failure (no entity URN resolved, no usable
+        # posts) — worth a clear 422 the extension can show as-is.
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        # richapi_client.py raises RuntimeError/TimeoutError on any RichAPI
+        # failure (rate limit, timeout, malformed response) — neither is a
+        # ValueError, so this was previously uncaught here and fell through
+        # to FastAPI's default handler, which returns PLAIN TEXT "Internal
+        # Server Error", not JSON. The extension's JSON.parse() on that
+        # response is exactly the "Unexpected token 'I'" error surfaced in
+        # the UI — the frontend was never wrong, this endpoint just never
+        # gave it JSON to parse in this failure path.
+        raise HTTPException(status_code=502, detail=f"Voice generation failed: {type(e).__name__}: {e}")
     await voice_store.upsert_voice_profile(
         api_key, {"linkedinUrl": linkedin_url, "voiceBrief": result["voiceBrief"]}
     )
