@@ -326,7 +326,30 @@ function _scanNotifications() {
     // mentioned you in a comment", name and phrase together. Extract the
     // name by stripping the known suffix phrase off that link's text,
     // instead of hunting for a separate name element that doesn't exist.
-    const link = allLinks.find((a) => /\/feed\/update\/|\/posts\//.test(a.getAttribute("href") || ""));
+    //
+    // A richer notification (a reply that also embeds a preview of the
+    // ORIGINAL post being discussed, not just a plain "X liked your
+    // post") can contain a SECOND link matching the same href pattern —
+    // the embedded post preview itself. Matching on href alone picked up
+    // whichever came first in DOM order, which silently grabbed the
+    // wrong one and produced a garbled name instead of the real one
+    // (live-confirmed 2026-07-20: "Marinell Falcón" never showed up,
+    // presumably because the post-preview link won the href match
+    // first). Requiring the candidate link's OWN TEXT to also contain
+    // the matched phrase ties extraction directly to the element that
+    // actually said "mentioned you in a comment" — a post-preview link
+    // never contains that phrase, so it can't win by accident anymore.
+    let link = allLinks.find((a) => {
+      const href = a.getAttribute("href") || "";
+      return /\/feed\/update\/|\/posts\//.test(href) && pattern.test(_cleanText(a));
+    });
+    if (!link) {
+      // Fallback to the old, looser match in case this specific
+      // notification type doesn't actually have the phrase text inside
+      // the link itself — better to try the previous best guess than
+      // drop the candidate entirely.
+      link = allLinks.find((a) => /\/feed\/update\/|\/posts\//.test(a.getAttribute("href") || ""));
+    }
     if (!link) { log(`candidate #${idx}: no feed/update or posts link found, skipping`); return; }
     const linkText = _cleanText(link);
     const name = linkText.replace(/\s*(mentioned you in a comment|replied to your comment)\.?.*$/i, "").trim();
