@@ -137,22 +137,27 @@ function _recentActivityUrl(profileUrl) {
 
 async function _scrapeOwnPostsInBackgroundTab(profileUrl, limit) {
   const tab = await chrome.tabs.create({ url: _recentActivityUrl(profileUrl), active: false });
-  try {
-    await _waitForTabComplete(tab.id, 15000);
-    // "complete" only means the initial page load finished — LinkedIn's
-    // SPA content (the actual posts) renders in asynchronously after
-    // that, same reasoning as content.js's own staggered _onNavigation
-    // re-checks elsewhere in this codebase. Retry with growing delays
-    // rather than a single fixed wait.
-    for (const delay of [1500, 3000, 5000]) {
-      await _sleep(delay);
-      const resp = await chrome.tabs.sendMessage(tab.id, { type: "SOCIAL_INTENT_SCRAPE_POSTS", limit }).catch(() => null);
-      if (resp && resp.posts && resp.posts.length > 0) return resp.posts;
+  await _waitForTabComplete(tab.id, 15000);
+  // "complete" only means the initial page load finished — LinkedIn's SPA
+  // content (the actual posts) renders in asynchronously after that, same
+  // reasoning as content.js's own staggered _onNavigation re-checks
+  // elsewhere in this codebase. Retry with growing delays rather than a
+  // single fixed wait.
+  for (const delay of [1500, 3000, 5000]) {
+    await _sleep(delay);
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: "SOCIAL_INTENT_SCRAPE_POSTS", limit }).catch(() => null);
+    if (resp && resp.posts && resp.posts.length > 0) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+      return resp.posts;
     }
-    return [];
-  } finally {
-    chrome.tabs.remove(tab.id).catch(() => {});
   }
+  // Deliberately NOT removing the tab here, unlike the success path above
+  // — if scraping found nothing, closing it immediately makes this
+  // undiagnosable. Left open so DevTools can be opened on it directly;
+  // its console has "[social-intent] scrape:" lines saying exactly what
+  // was and wasn't found.
+  console.warn(`[social-intent] post scraping found nothing on tab ${tab.id} — left open for inspection`);
+  return [];
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

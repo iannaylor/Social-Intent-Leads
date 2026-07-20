@@ -117,44 +117,69 @@ function _findPostText() {
   return null;
 }
 
+function _extractCardText(card) {
+  for (const sel of _POST_DESCRIPTION_SELECTORS) {
+    const el = card.querySelector(sel);
+    if (el) {
+      const t = _cleanText(el);
+      if (t.length > 20) return t;
+    }
+  }
+  return null;
+}
+
 // Voice-brief scraping: reads the CALLER's own recent posts directly off
 // their own recent-activity page, in their own already-logged-in browser
 // — deliberately NOT via RichAPI. RichAPI exists to find OTHER people's
 // posts for prospecting; there's no reason to route a read of your OWN
 // posts, while your own browser is already sitting on the page, through a
-// third-party API that can rate-limit or time out. Same post-detection
-// technique as _scanFeedForIntentMatches (post links -> climb to a
-// card-sized container -> dedupe by activity id), just collecting text
-// instead of scanning for keywords, since a recent-activity page is
-// structurally a list of post cards same as the main feed.
+// third-party API that can rate-limit or time out.
+//
+// Two detection strategies, tried in order — the recent-activity listing
+// page's exact markup wasn't observable before writing this (no way to
+// run a live browser), so this tries the same link-based approach
+// _scanFeedForIntentMatches uses on the main feed first, then falls back
+// to matching post-card CONTAINERS directly (LinkedIn reuses the same
+// feed-rendering component, .feed-shared-update-v2, across the main feed,
+// profile activity, and search results) in case this page's permalinks
+// don't share the main feed's href pattern. Logs enough at every step to
+// diagnose from the console without another round-trip if both fail.
 function _scrapeOwnRecentPosts(limit) {
-  const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
-  const seenActivityIds = new Set();
   const posts = [];
 
+  const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
+  log(`scrape: found ${postLinks.length} post permalink(s) via link selector`);
+  const seenActivityIds = new Set();
   for (const link of postLinks) {
     if (posts.length >= limit) break;
     const activityId = _extractActivityId(link.getAttribute("href") || "");
     if (!activityId || seenActivityIds.has(activityId)) continue;
     seenActivityIds.add(activityId);
-
     let card = link;
     for (let depth = 0; depth < 12 && card.parentElement; depth++) {
       card = card.parentElement;
       if (_cleanText(card).length > 150) break;
     }
-
-    let text = null;
-    for (const sel of _POST_DESCRIPTION_SELECTORS) {
-      const el = card.querySelector(sel);
-      if (el) {
-        const t = _cleanText(el);
-        if (t.length > 20) { text = t; break; }
-      }
-    }
+    const text = _extractCardText(card);
     if (text) posts.push(text);
   }
-  log(`scraped ${posts.length} post(s) for voice brief (from ${postLinks.length} post link(s) on page)`);
+
+  if (posts.length === 0) {
+    const cards = Array.from(document.querySelectorAll(".feed-shared-update-v2, article"));
+    log(`scrape: link-based approach found 0 posts, falling back to ${cards.length} card container(s)`);
+    for (const card of cards) {
+      if (posts.length >= limit) break;
+      const text = _extractCardText(card);
+      if (text) posts.push(text);
+    }
+  }
+
+  if (posts.length === 0) {
+    const sampleHrefs = Array.from(document.querySelectorAll("a[href]")).slice(0, 15).map((a) => a.getAttribute("href"));
+    log("scrape: found 0 posts via either strategy. Sample hrefs on page:", sampleHrefs);
+  }
+
+  log(`scraped ${posts.length} post(s) for voice brief`);
   return posts;
 }
 

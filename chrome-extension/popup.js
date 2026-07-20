@@ -258,7 +258,7 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
       .then((resp) => {
         if (!resp || !resp.ok) throw new Error((resp && resp.error) || "Could not read your posts");
         if (!resp.posts || !resp.posts.length) {
-          throw new Error("No posts found on your recent activity page — make sure your profile has public posts.");
+          throw new Error("No posts found — a tab was left open on your activity page so this can be debugged; check its console.");
         }
         genMsg.textContent = `Drafting from ${resp.posts.length} post(s)…`;
         return fetch(`${cfg.url}/voice/generate`, {
