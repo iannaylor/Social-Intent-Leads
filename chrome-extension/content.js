@@ -261,10 +261,15 @@ function _findReplyAuthorNear(mentionLink, maxDepth, maxWrapperTextLen) {
 
 function _findOwnCommentReplies() {
   if (!OWN_NAME) return [];
-  const mentionLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')).filter(
-    (a) => _cleanText(a) === OWN_NAME
-  );
-  log(`found ${mentionLinks.length} link(s) reading exactly "${OWN_NAME}" (mentions inside a reply to us)`);
+  // Relaxed from an exact match to startsWith: LinkedIn occasionally
+  // appends trailing text to a mention chip (a connection-degree badge,
+  // "(She/Her)", etc.) inside the same <a>, which broke a pure `=== OWN_NAME`
+  // match even though the mention was genuinely there.
+  const mentionLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')).filter((a) => {
+    const t = _cleanText(a);
+    return t === OWN_NAME || t.startsWith(OWN_NAME + " ") || t.startsWith(OWN_NAME + "(");
+  });
+  log(`found ${mentionLinks.length} link(s) reading "${OWN_NAME}" (mentions inside a reply to us)`);
 
   const results = [];
   mentionLinks.forEach((mentionLink, i) => {
@@ -283,6 +288,59 @@ function _findOwnCommentReplies() {
     const replyAuthor = _cleanText(authorLink);
     const replyText = bodyText.replace(new RegExp(`^${OWN_NAME}\\s*`), "").trim();
     log(`  => reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
+    if (replyText) results.push({ replyAuthor, replyText });
+  });
+
+  if (results.length > 0) return results;
+
+  // Fallback (added 2026-07-20): the @mention strategy above only catches
+  // replies where LinkedIn actually inserted an "@Ian Naylor" chip into the
+  // reply body. That's real behavior for the reply flow tested on
+  // 2026-07-17, but it isn't guaranteed for every reply path (e.g. a
+  // reply typed without using the mention chip) — a reply can be visibly
+  // nested directly under our own comment with no @mention at all, and the
+  // mention-based scan above finds nothing for it. This walks from our own
+  // comment's heading instead of from a mention, and grabs the nearest
+  // OTHER profile link that appears after it in document order — same
+  // "structurally guaranteed profile link" anchor, just anchored from the
+  // other end.
+  log("no @mention-based replies found — trying structural fallback (reply without an explicit mention)");
+  return _findRepliesUnderOwnComment();
+}
+
+function _findRepliesUnderOwnComment() {
+  if (!OWN_NAME) return [];
+  // Same technique _findOwnCommentText uses: our own name isn't hyperlinked
+  // in our own comment's author heading, so look for a short unlinked leaf
+  // node whose text is exactly our name.
+  const headings = Array.from(document.querySelectorAll("span, div, a")).filter((el) => {
+    if (el.children.length > 0) return false;
+    return _cleanText(el) === OWN_NAME;
+  });
+  log(`structural fallback: found ${headings.length} own-comment heading(s)`);
+
+  const results = [];
+  headings.forEach((heading, i) => {
+    const ownContainer = _boundedContainer(heading, OWN_NAME.length + 15, 2000, 6);
+    const parent = ownContainer.parentElement;
+    if (!parent) return;
+
+    const candidateLinks = Array.from(parent.querySelectorAll('a[href*="/in/"]')).filter((a) => {
+      const t = _cleanText(a);
+      if (!t || t === OWN_NAME) return false;
+      // Must come AFTER our own comment in document order — otherwise
+      // this picks up an earlier, unrelated commenter instead of a reply.
+      return !!(ownContainer.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    if (!candidateLinks.length) {
+      log(`  own-comment #${i}: no distinct profile link found after it — no reply (yet)`);
+      return;
+    }
+    const authorLink = candidateLinks[0];
+    const replyAuthor = _cleanText(authorLink);
+    const bodyContainer = _boundedContainer(authorLink, replyAuthor.length + 5, 2000, 5);
+    const replyText = _cleanText(bodyContainer).replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
+    log(`  own-comment #${i}: structural match — reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
     if (replyText) results.push({ replyAuthor, replyText });
   });
   return results;
