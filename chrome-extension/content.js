@@ -244,6 +244,19 @@ function _isOwnName(t) {
   return t.startsWith(OWN_NAME) && t.length - OWN_NAME.length <= 20;
 }
 
+// Every genuine LinkedIn comment/reply has "Like" and "Reply" action text
+// directly beneath it. Live-confirmed bug (2026-07-20): the mention scan
+// below searches the WHOLE document for a link reading our name, which
+// also catches unrelated UI elsewhere on the page that happens to mention
+// us — e.g. a messaging-widget chat bubble showing "Ian Naylor 8:12 AM"
+// got picked up as a second "reply" with body "8:12 AM", and on a later
+// re-scan it happened to sort ahead of the real reply and overwrote it.
+// Requiring a nearby "Reply" action rejects that kind of noise, since
+// nothing outside the comments section has one.
+function _looksLikeCommentReply(containerText) {
+  return /\bReply\b/.test(containerText);
+}
+
 // Climb one ancestor level at a time (rather than jumping straight to a
 // text-length target) until an ancestor contains a profile link that
 // ISN'T us — that's the reply's real author heading, which live testing
@@ -270,7 +283,7 @@ function _findReplyAuthorNear(mentionLink, maxDepth, maxWrapperTextLen) {
     });
     if (other) {
       log(`    found distinct author link "${_cleanText(other)}" at depth ${depth} (wrapper text length ${wrapperText.length})`);
-      return other;
+      return { authorLink: other, wrapperText };
     }
   }
   return null;
@@ -289,13 +302,17 @@ function _findOwnCommentReplies() {
     const bodyText = _cleanText(bodyContainer);
     log(`mention #${i}: reply body = "${bodyText.slice(0, 150)}"`);
 
-    const authorLink = _findReplyAuthorNear(mentionLink, 12, 2500);
-    if (!authorLink) {
+    const found = _findReplyAuthorNear(mentionLink, 12, 2500);
+    if (!found) {
       log(`  no distinct author found within climb/text caps — skipping`);
       return;
     }
+    if (!_looksLikeCommentReply(found.wrapperText)) {
+      log(`  no "Reply" action found nearby — this isn't a real comment (likely unrelated page noise), skipping`);
+      return;
+    }
 
-    const replyAuthor = _cleanText(authorLink);
+    const replyAuthor = _cleanText(found.authorLink);
     const replyText = bodyText.replace(new RegExp(`^${OWN_NAME}\\s*`), "").trim();
     log(`  => reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
     if (replyText) results.push({ replyAuthor, replyText });
@@ -349,7 +366,12 @@ function _findRepliesUnderOwnComment() {
     const authorLink = candidateLinks[0];
     const replyAuthor = _cleanText(authorLink);
     const bodyContainer = _boundedContainer(authorLink, replyAuthor.length + 5, 2000, 5);
-    const replyText = _cleanText(bodyContainer).replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
+    const bodyText = _cleanText(bodyContainer);
+    if (!_looksLikeCommentReply(bodyText)) {
+      log(`  own-comment #${i}: nearest profile link "${replyAuthor}" has no "Reply" action nearby — not a real comment, skipping`);
+      return;
+    }
+    const replyText = bodyText.replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
     log(`  own-comment #${i}: structural match — reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
     if (replyText) results.push({ replyAuthor, replyText });
   });

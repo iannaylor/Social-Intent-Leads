@@ -1639,6 +1639,21 @@ function processReplyMessage(msg) {
   console.log(match ? `[social-intent] matched Queue item: "${match.name}"` : "[social-intent] no Queue match — drafting from scraped page content instead");
 
   getHandledReplies((handled) => {
+    // content.js can send more than one "reply" per scan (e.g. a false
+    // match from something else on the page that happens to mention us),
+    // and re-scans can reorder which one comes first in the array. Live
+    // bug (2026-07-20): a correct reply was showing, a later scan put a
+    // bogus match first instead, and picking msg.replies[0] blindly
+    // overwrote the correct banner with the bogus one. If the reply
+    // currently on screen is still present anywhere in this update, keep
+    // it — don't let array order alone decide.
+    if (
+      currentBannerActivityId === msg.activityId &&
+      msg.replies.some((r) => `${msg.activityId}|${r.replyAuthor}|${r.replyText}` === currentBannerSignature)
+    ) {
+      console.log("[social-intent] currently-shown reply is still present in this update — keeping it as-is");
+      return;
+    }
     const fresh = msg.replies.find(
       (r) => !handled.has(`${msg.activityId}|${r.replyAuthor}|${r.replyText}`)
     );
