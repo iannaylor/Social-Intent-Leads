@@ -293,6 +293,43 @@ async def process_batch(
         print(f"[pipeline] run {run_id}: PHASE 2 — nothing left in pool", flush=True)
         return report
 
+    # Checkpoint buffer: flushed every 10 candidates (matching
+    # airtable_store.update_items' own internal PATCH chunk size, so this
+    # doesn't add extra Airtable round-trips beyond what a single flush at
+    # the end would already need) and once more after the loop for
+    # whatever's left. This is the actual fix for a real incident: a run
+    # spent 32 paid enrich_profile calls, then got killed (a Render
+    # redeploy mid-batch, confirmed live 2026-07-20) before the OLD
+    # single end-of-loop checkpoint ever ran, losing all 32 calls' worth
+    # of work with nothing to show for the spend — worse, the checkpoint
+    # meant to prevent exactly this had never once fired in this table's
+    # history, because it only wrote after the ENTIRE loop finished, not
+    # incrementally. Checkpointing in small groups DURING the loop means a
+    # mid-loop kill now loses at most one partial group, not the batch.
+    checkpoint_buffer = []
+
+    async def _flush_checkpoint():
+        if not checkpoint_buffer:
+            return
+        payload = [
+            {
+                "recordId": c["recordId"],
+                "action": c["action"] if c["action"] == "skip" else "enriched_pending_draft",
+                "skipReason": c.get("skipReason"),
+            }
+            for c in checkpoint_buffer
+        ]
+        await airtable_store.update_items(payload, base_id, api_key)
+        print(f"[pipeline] run {run_id}: STEP 4 checkpoint saved ({len(payload)} record(s))", flush=True)
+        checkpoint_buffer.clear()
+
+    async def _mark_processed(c):
+        if on_item_processed is not None:
+            await on_item_processed(c)
+        checkpoint_buffer.append(c)
+        if len(checkpoint_buffer) >= 10:
+            await _flush_checkpoint()
+
     async with RichAPIClient() as richapi:
         # ---- ICP qualification ----
         print(f"[pipeline] run {run_id}: STEP 4 — ICP qualification for {len(batch)} candidates", flush=True)
@@ -313,16 +350,14 @@ async def process_batch(
                 # design (see SKILL.md) — they're not being evaluated as a
                 # personal buyer.
                 c["action"] = "comment+connect"
-                if on_item_processed is not None:
-                    await on_item_processed(c)
+                await _mark_processed(c)
                 continue
 
             if not c.get("profileUrl"):
                 c["action"] = "skip"
                 c["skipReason"] = "No LinkedIn profile URL available to verify title/company."
                 report["droppedAtIcp"] += 1
-                if on_item_processed is not None:
-                    await on_item_processed(c)
+                await _mark_processed(c)
                 continue
 
             try:
@@ -332,8 +367,7 @@ async def process_batch(
                 c["action"] = "skip"
                 c["skipReason"] = f"Could not verify profile (enrich_profile failed): {e}"
                 report["droppedAtIcp"] += 1
-                if on_item_processed is not None:
-                    await on_item_processed(c)
+                await _mark_processed(c)
                 continue
 
             headline = profile_data.get("headline") or ""
@@ -381,8 +415,14 @@ async def process_batch(
                 c["skipReason"] = reason
                 report["droppedAtIcp"] += 1
 
-            if on_item_processed is not None:
-                await on_item_processed(c)
+            await _mark_processed(c)
+
+        # Flush whatever's left in the buffer (fewer than 10 since the last
+        # automatic flush, or the loop broke early on a declined
+        # authorization) — every candidate touched above must be on disk
+        # before STEP 5/6 start, not just the ones that happened to land on
+        # a multiple of 10.
+        await _flush_checkpoint()
 
         if on_item_authorize is not None and authorized_count < len(batch):
             # Stopped early — the un-authorized trailing candidates never
@@ -396,28 +436,6 @@ async def process_batch(
 
         qualified = [c for c in batch if c["action"] in ("comment", "comment+connect")]
         print(f"[pipeline] run {run_id}: STEP 4 done — {len(qualified)}/{len(batch)} qualified", flush=True)
-
-        # Checkpoint: save ICP results NOW, before STEP 5/6 even start. This
-        # is the direct fix for a real incident — a run spent 32 paid
-        # enrich_profile calls, then something later in the same pipeline
-        # failed, and because everything was held in memory until one write
-        # at the very end, all 32 calls' worth of results were gone with
-        # nothing to show for the spend. Skips are already final at this
-        # point (real skipReason, not a guess) — write those as-is. Passes
-        # get a distinct interim action so a later crash leaves them
-        # recoverable instead of stuck in limbo or silently lost.
-        checkpoint_payload = []
-        for c in batch:
-            checkpoint_action = c["action"] if c["action"] == "skip" else "enriched_pending_draft"
-            checkpoint_payload.append(
-                {
-                    "recordId": c["recordId"],
-                    "action": checkpoint_action,
-                    "skipReason": c.get("skipReason"),
-                }
-            )
-        await airtable_store.update_items(checkpoint_payload)
-        print(f"[pipeline] run {run_id}: STEP 4 checkpoint saved ({len(checkpoint_payload)} records)", flush=True)
 
         # ---- STEP 5: find & verify emails (qualified only) ----
         # Wrapped in try/except deliberately: a real run lost ALL of a
@@ -522,6 +540,6 @@ async def process_batch(
                 "emailStatus": c.get("emailStatus"),
             }
         )
-    await airtable_store.update_items(update_payload)
+    await airtable_store.update_items(update_payload, base_id, api_key)
     print(f"[pipeline] run {run_id}: PHASE 2 done. {report}", flush=True)
     return report
