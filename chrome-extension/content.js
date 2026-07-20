@@ -37,6 +37,25 @@ function log(...args) {
   console.log(LOG_PREFIX, ...args);
 }
 
+// Every reload of the extension orphans any content script instance
+// already injected into an already-open tab — its chrome.runtime binding
+// is dead, but the script itself keeps running until that tab gets a real
+// page refresh (documented at the top of this file). If an orphaned
+// instance then tries to send a message, chrome.runtime.sendMessage can
+// throw "Extension context invalidated" SYNCHRONOUSLY, before even
+// returning a promise — a plain .catch() on the call doesn't catch that,
+// only wrapping the call itself does. Harmless and expected (confirmed
+// live 2026-07-20, showed up in chrome://extensions's error log during
+// normal reload-then-test iteration), but worth failing silently instead
+// of surfacing as a scary uncaught error.
+function _safeSendMessage(msg) {
+  try {
+    chrome.runtime.sendMessage(msg).catch(() => {});
+  } catch (e) {
+    log("sendMessage failed (extension context invalidated — reload this tab):", e.message);
+  }
+}
+
 chrome.storage.local.get(["ownDisplayName"], (r) => {
   OWN_NAME = r.ownDisplayName || null;
   if (!OWN_NAME) {
@@ -366,7 +385,7 @@ function _scanNotifications() {
 
   if (found.length) {
     log(`sending ${found.length} new notification(s) to extension`, found);
-    chrome.runtime.sendMessage({ type: "SOCIAL_INTENT_NOTIFICATIONS_FOUND", items: found }).catch(() => {});
+    _safeSendMessage({ type: "SOCIAL_INTENT_NOTIFICATIONS_FOUND", items: found });
   }
 }
 
@@ -391,17 +410,18 @@ function _report() {
     // post shouldn't be treated as "already reported."
     lastActivityId = activityId;
     lastReportedReplySignature = null;
-    chrome.runtime.sendMessage({ type: "SOCIAL_INTENT_POST_CHANGED", activityId }).catch(() => {});
+    _safeSendMessage({ type: "SOCIAL_INTENT_POST_CHANGED", activityId });
   }
 
   if (location.href !== lastReportedUrl) {
     lastReportedUrl = location.href;
     log("post detected, activityId =", activityId);
-    chrome.runtime.sendMessage({
+    // side panel may not be open — fine, just no listener
+    _safeSendMessage({
       type: "SOCIAL_INTENT_POST_DETECTED",
       activityId,
       url: location.href,
-    }).catch(() => {}); // side panel may not be open — fine, just no listener
+    });
   }
 
   const replies = _findOwnCommentReplies();
@@ -416,14 +436,14 @@ function _report() {
       log(`postText scraped: ${postText ? `"${postText.slice(0, 100)}..."` : "(none found)"}`);
       log(`ownComment scraped: ${ownComment ? `"${ownComment.slice(0, 100)}..."` : "(none found)"}`);
       log(`sending ${replies.length} reply(ies) to extension`, replies);
-      chrome.runtime.sendMessage({
+      _safeSendMessage({
         type: "SOCIAL_INTENT_REPLY_DETECTED",
         activityId,
         url: location.href,
         replies,
         postText,
         ownComment,
-      }).catch(() => {});
+      });
     }
   } else {
     log("no replies found on this pass");
