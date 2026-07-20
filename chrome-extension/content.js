@@ -227,6 +227,23 @@ function _findOwnCommentText() {
   return null;
 }
 
+// A mention chip's text is our name plus, at most, a short trailing badge
+// (a connection-degree label, "(She/Her)", " • You") — never a whole
+// headline. Bug found live 2026-07-20: an earlier version of this allowed
+// ANY trailing text after our name, which let our own comment's combined
+// name+badge+HEADLINE link ("Ian Naylor • You Serial Entrepreneur; founder
+// of multiple SaaS businesses...") get matched as if it were a mention
+// inside someone else's reply, corrupting the whole detection (wrong
+// author, wrong quoted text, and consequently a nonsensical AI draft built
+// from our own bio instead of their actual reply). Capping the allowed
+// slack at 20 chars keeps genuine short badges matching while rejecting a
+// full headline.
+function _isOwnName(t) {
+  if (!OWN_NAME || !t) return false;
+  if (t === OWN_NAME) return true;
+  return t.startsWith(OWN_NAME) && t.length - OWN_NAME.length <= 20;
+}
+
 // Climb one ancestor level at a time (rather than jumping straight to a
 // text-length target) until an ancestor contains a profile link that
 // ISN'T us — that's the reply's real author heading, which live testing
@@ -249,7 +266,7 @@ function _findReplyAuthorNear(mentionLink, maxDepth, maxWrapperTextLen) {
     // the actual name link even gets checked.
     const other = links.find((a) => {
       const t = _cleanText(a);
-      return t && t !== OWN_NAME;
+      return t && !_isOwnName(t);
     });
     if (other) {
       log(`    found distinct author link "${_cleanText(other)}" at depth ${depth} (wrapper text length ${wrapperText.length})`);
@@ -261,14 +278,7 @@ function _findReplyAuthorNear(mentionLink, maxDepth, maxWrapperTextLen) {
 
 function _findOwnCommentReplies() {
   if (!OWN_NAME) return [];
-  // Relaxed from an exact match to startsWith: LinkedIn occasionally
-  // appends trailing text to a mention chip (a connection-degree badge,
-  // "(She/Her)", etc.) inside the same <a>, which broke a pure `=== OWN_NAME`
-  // match even though the mention was genuinely there.
-  const mentionLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')).filter((a) => {
-    const t = _cleanText(a);
-    return t === OWN_NAME || t.startsWith(OWN_NAME + " ") || t.startsWith(OWN_NAME + "(");
-  });
+  const mentionLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')).filter((a) => _isOwnName(_cleanText(a)));
   log(`found ${mentionLinks.length} link(s) reading "${OWN_NAME}" (mentions inside a reply to us)`);
 
   const results = [];
@@ -327,7 +337,7 @@ function _findRepliesUnderOwnComment() {
 
     const candidateLinks = Array.from(parent.querySelectorAll('a[href*="/in/"]')).filter((a) => {
       const t = _cleanText(a);
-      if (!t || t === OWN_NAME) return false;
+      if (!t || _isOwnName(t)) return false;
       // Must come AFTER our own comment in document order — otherwise
       // this picks up an earlier, unrelated commenter instead of a reply.
       return !!(ownContainer.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
