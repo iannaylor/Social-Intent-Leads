@@ -1,9 +1,11 @@
 // The side panel is only useful on a LinkedIn tab — everywhere else it's
 // just in the way. This makes it per-tab: enabled (and open) only while a
 // LinkedIn tab is active, disabled (which auto-closes it) on every other
-// tab. Clicking the toolbar icon on a non-LinkedIn tab navigates that tab
-// to LinkedIn and opens the panel at the same time, instead of requiring a
-// manual "go to LinkedIn first" step.
+// tab. Clicking the toolbar icon on a non-LinkedIn tab opens LinkedIn in a
+// NEW tab instead of requiring a manual "go to LinkedIn first" step —
+// deliberately tabs.create(), not tabs.update(): the user's existing tab
+// and whatever they're looking at there must never be hijacked out from
+// under them just because they clicked the extension icon.
 
 const LINKEDIN_URL = "https://www.linkedin.com/feed/";
 
@@ -79,9 +81,22 @@ chrome.runtime.onStartup.addListener(sweepAllTabs);
 // side panel calls in the order they were issued regardless.
 chrome.action.onClicked.addListener((tab) => {
   const onLinkedIn = isLinkedInUrl(tab.url);
-  chrome.sidePanel.setOptions({ tabId: tab.id, path: "popup.html", enabled: true }).catch(() => {});
-  chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.error("[social-intent] sidePanel.open failed:", e));
-  if (!onLinkedIn) {
-    chrome.tabs.update(tab.id, { url: LINKEDIN_URL });
+  if (onLinkedIn) {
+    chrome.sidePanel.setOptions({ tabId: tab.id, path: "popup.html", enabled: true }).catch(() => {});
+    chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.error("[social-intent] sidePanel.open failed:", e));
+    return;
   }
+  // Not on LinkedIn: open it in a new tab, never touch the current one.
+  // The new tab's real tab id isn't known synchronously (tabs.create() is
+  // async), and awaiting it before calling sidePanel.open() would expire
+  // this click's user-gesture window — same constraint documented above
+  // for the same-tab case. Opening by windowId instead of tabId sidesteps
+  // that: it doesn't need the new tab's id up front, and
+  // setPanelEnabledForTab (wired to onActivated/onUpdated below) enables
+  // the panel correctly once Chrome reports the new tab's real state.
+  // NEEDS LIVE VERIFICATION — untested against Chrome's actual behavior
+  // when the window's currently-active tab has the panel disabled at the
+  // moment open() fires; report back what actually happens.
+  chrome.sidePanel.open({ windowId: tab.windowId }).catch((e) => console.error("[social-intent] sidePanel.open failed:", e));
+  chrome.tabs.create({ url: LINKEDIN_URL });
 });
