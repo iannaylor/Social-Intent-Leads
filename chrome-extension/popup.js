@@ -1744,13 +1744,23 @@ function removeNotificationLead(name, url, cb) {
 // be messy (headline text glommed on, see _isOwnName's slack in
 // content.js) while a lead's stored url and this activityId both resolve
 // to the same underlying LinkedIn post either way.
+//
+// Also auto-advances to whatever's now first in the list — live feedback
+// (2026-07-21): working through Follow-ups meant an extra manual "Open"
+// click on the next entry after every single Done/Dismiss. This only
+// fires when `match` was found above (i.e. this reply genuinely came from
+// the Follow-ups list), so it never fires for a reply handled from the
+// plain Queue flow. Not committing to anything by loading the page —
+// Draft Response still has to be clicked same as before — just saves the
+// click of navigating there.
 function _removeMatchingNotificationLead(activityId) {
   if (!activityId) return;
   getNotificationLeads((leads) => {
     const match = leads.find((l) => _extractActivityId(l.url) === activityId);
     if (!match) return;
-    removeNotificationLead(match.name, match.url, () => {
+    removeNotificationLead(match.name, match.url, (remaining) => {
       if (currentView === "followups") renderFollowupsView();
+      if (remaining.length > 0) openInWorkingTab(remaining[0].url);
     });
   });
 }
