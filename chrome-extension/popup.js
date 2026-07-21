@@ -1053,7 +1053,13 @@ function loadPendingPreview(p, cfg, targetEl, extras) {
       // cached number that was there before — this is the actual current
       // Airtable backlog, not a locally-derived guess.
       if (lastRunLineEl) {
-        lastRunLineEl.textContent = `Last run: ${relativeTime(p.lastRunAt)}${total ? ` — ${total} pending processing` : ""}`;
+        // This is the whole product's backlog (every search profile
+        // targeting it), not just what THIS profile's last scan found —
+        // get_pending_batch filters by product only. Labeled explicitly
+        // after live confusion (2026-07-21): a scan reporting "80 new"
+        // next to a "56 pending" on the same card read as leads going
+        // missing, when the two numbers are simply scoped differently.
+        lastRunLineEl.textContent = `Last run: ${relativeTime(p.lastRunAt)}${total ? ` — ${total} pending processing (product-wide backlog)` : ""}`;
       }
       // Keep the cached value roughly in sync so a fresh render before
       // the next live check still shows something reasonable.
@@ -1169,7 +1175,16 @@ function pollJob(jobId, cfg, statusEl, btnEl, activeRunKey, kind, profileSlugFor
       if (run.status === "completed") {
         const r = run.report || {};
         if (kind === "scan") {
-          statusEl.textContent = `Scan done — ${r.candidatesFound || 0} found, ${r.newCount ?? 0} new, ${r.duplicateCount ?? 0} already seen, ${r.skippedCount || 0} off-topic.`;
+          // newCount + duplicateCount is the FULL, correct partition of
+          // candidatesFound (new-vs-already-in-Airtable). skippedCount is a
+          // SEPARATE axis (topic relevance) computed independently over
+          // that same set — some off-topic posts are new, some are
+          // duplicates, so it isn't a third slice to add on top. Printing
+          // all four as if they summed to candidatesFound was genuinely
+          // false arithmetic (live-caught 2026-07-21: 80 new + 129 already
+          // seen + 41 off-topic = 250, not the 209 actually found) and
+          // read as leads silently going missing when none were.
+          statusEl.textContent = `Scan done — ${r.candidatesFound || 0} found: ${r.newCount ?? 0} new, ${r.duplicateCount ?? 0} already seen (${r.skippedCount || 0} of those off-topic).`;
           // Persisted onto the profile (not just this transient status
           // line) so "did this scan actually find anything" is still
           // answerable later, without needing to have had the panel open
@@ -1265,7 +1280,7 @@ function renderProfilesView() {
           <div class="pname">${p.name}</div>
           <div class="psummary">${profileSummary(p)}</div>
           <div class="lastRun" id="lastRunLine-${slug}">Last run: ${relativeTime(p.lastRunAt)}${p.pendingCount ? ` — ${p.pendingCount} pending processing (checking…)` : ""}</div>
-          ${p.lastScanFound != null ? `<div class="lastScanStats">Last scan found ${p.lastScanFound}${p.lastScanNew != null ? ` — ${p.lastScanNew} new, ${p.lastScanDuplicate ?? 0} already seen, ${p.lastScanSkipped ?? 0} off-topic` : ""}</div>` : ""}
+          ${p.lastScanFound != null ? `<div class="lastScanStats">Last scan found ${p.lastScanFound}${p.lastScanNew != null ? `: ${p.lastScanNew} new, ${p.lastScanDuplicate ?? 0} already seen (${p.lastScanSkipped ?? 0} of those off-topic)` : ""}</div>` : ""}
           <div id="pendingPreview-${slug}" class="pendingPreview"></div>
           <div class="iconRow">
             ${cfg.configured
