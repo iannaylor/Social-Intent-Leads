@@ -1735,6 +1735,26 @@ function removeNotificationLead(name, url, cb) {
   });
 }
 
+// Once a reply from the Follow-ups "to check" list has actually been
+// looked at (dismissed, or drafted-and-marked-Done), the underlying
+// notification-lead entry has served its purpose and should disappear too
+// — live feedback (2026-07-21): finishing a reply left the source entry
+// sitting in the list looking like it still needed checking. Matched by
+// activityId rather than name/url text, since reply.replyAuthor here can
+// be messy (headline text glommed on, see _isOwnName's slack in
+// content.js) while a lead's stored url and this activityId both resolve
+// to the same underlying LinkedIn post either way.
+function _removeMatchingNotificationLead(activityId) {
+  if (!activityId) return;
+  getNotificationLeads((leads) => {
+    const match = leads.find((l) => _extractActivityId(l.url) === activityId);
+    if (!match) return;
+    removeNotificationLead(match.name, match.url, () => {
+      if (currentView === "followups") renderFollowupsView();
+    });
+  });
+}
+
 if (chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
@@ -1785,6 +1805,7 @@ function renderReplyBanner(item, reply, activityId, postText, ownComment) {
   };
   document.getElementById("dismissReplyBtn").onclick = () => {
     markReplyHandled(signature);
+    _removeMatchingNotificationLead(activityId);
     closeBanner();
   };
   document.getElementById("draftReplyBtn").onclick = () => {
@@ -1828,6 +1849,7 @@ function renderReplyBanner(item, reply, activityId, postText, ownComment) {
           // and stops it being shown again.
           document.getElementById("doneReplyBtn").onclick = () => {
             markReplyHandled(signature);
+            _removeMatchingNotificationLead(activityId);
             closeBanner();
           };
           btn.disabled = false;
