@@ -615,6 +615,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     _loadOverlaySettings();
   }
 });
+// Live bug (2026-07-21): cachedProductKeywords was fetched once per page
+// load and never refreshed after that — a product added or edited on the
+// backend (e.g. a new product created mid-session) was invisible to any
+// LinkedIn tab that had already been open since before that change, with
+// no way to notice short of manually refreshing the tab. Re-fetching
+// periodically instead of only once means a product change shows up on
+// its own within a few minutes, not only after remembering to reload.
+setInterval(() => {
+  if (overlayEnabled && _overlayBackendUrl && _overlayApiKey) {
+    _fetchProductKeywords(_overlayBackendUrl, _overlayApiKey);
+  }
+}, 5 * 60 * 1000);
 
 function _fetchProductKeywords(backendUrl, apiKey) {
   fetch(`${backendUrl}/products`, { headers: { Authorization: `Bearer ${apiKey}` } })
