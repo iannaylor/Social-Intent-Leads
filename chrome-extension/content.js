@@ -747,11 +747,31 @@ function _fetchProductKeywords(backendUrl, apiKey) {
 // undefined). Falling back to the post's /company/ link picks up the
 // organization's name as the "author" for company-page posts instead of
 // silently returning nothing.
+//
+// Live bug (2026-07-21), same day: on some post layouts the author link
+// isn't just the name — LinkedIn wraps the WHOLE header block (name,
+// connection-degree badge, AND headline) in one clickable /in/ link, so
+// _cleanText's flattened textContent pulled the headline in too (e.g.
+// "Rohit Lamani • 3rd+ AWS Student Ambassador |AWS Co-organizer..."). Use
+// _firstLine instead: textContent has no line breaks at all, but
+// innerText is layout-aware and inserts one at each rendered block
+// boundary, so the name (its own line) splits cleanly from the headline
+// (the next line down) without hardcoding any LinkedIn CSS class name —
+// this file deliberately avoids depending on those elsewhere since they
+// change without notice.
+function _firstLine(el) {
+  const text = (el && (el.innerText || el.textContent)) || "";
+  const firstLine = text.split("\n").map((l) => l.trim()).find((l) => l.length > 0) || "";
+  // Strip a trailing "• 3rd+" / "• 1st" connection-degree badge, which
+  // renders on the same line as the name itself.
+  return firstLine.replace(/\s*•\s*(1st|2nd|3rd\+?|\d+(st|nd|rd|th)\+?)\s*$/i, "").trim();
+}
+
 function _findPostAuthor(card) {
   const personLink = Array.from(card.querySelectorAll('a[href*="/in/"]')).find((a) => _cleanText(a).length > 0);
-  if (personLink) return { name: _cleanText(personLink), profileUrl: personLink.href };
+  if (personLink) return { name: _firstLine(personLink), profileUrl: personLink.href };
   const companyLink = Array.from(card.querySelectorAll('a[href*="/company/"]')).find((a) => _cleanText(a).length > 0);
-  if (companyLink) return { name: _cleanText(companyLink), profileUrl: companyLink.href };
+  if (companyLink) return { name: _firstLine(companyLink), profileUrl: companyLink.href };
   return { name: null, profileUrl: null };
 }
 
