@@ -142,9 +142,19 @@ async def get_item_by_name(name: str, base_id: Optional[str] = None, api_key: Op
     MESSAGE referencing 'your comment on my post' with nothing but the
     sender's name to go on. Best-effort: names aren't unique, so this
     just returns whatever Airtable hands back first rather than trying to
-    disambiguate multiple people sharing a name."""
-    escaped = name.replace("'", "\\'")
-    filter_formula = f"{{{FIELD_NAMES['name']}}} = '{escaped}'"
+    disambiguate multiple people sharing a name.
+
+    Live bug (2026-07-21), confirmed by direct query: a stored Name value
+    can contain a double space ("Victoria  Olamide") invisible in
+    Airtable's own grid view (browsers collapse repeated whitespace
+    visually), while the client-side scrape produces a clean single-space
+    name via _cleanText()'s whitespace collapsing. A plain exact-match
+    formula silently failed against real, visibly-identical-looking data.
+    REGEX_REPLACE'ing the stored field down to single spaces before
+    comparing (mirroring what _cleanText already does client-side) fixes
+    this without needing to also clean up existing bad data."""
+    escaped = name.replace("'", "\\'").strip()
+    filter_formula = f"REGEX_REPLACE(TRIM({{{FIELD_NAMES['name']}}}), '\\s+', ' ') = '{escaped}'"
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
             _url(base_id),
