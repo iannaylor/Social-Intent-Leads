@@ -1849,9 +1849,21 @@ function renderReplyBanner(item, reply, activityId, postText, ownComment) {
             </div>
             <div id="replyCopiedMsg" style="font-size:11px;color:#0a7d2c;min-height:14px;margin-top:4px;"></div>
           `;
+          const replyCopiedMsg = document.getElementById("replyCopiedMsg");
+          // Auto-copy on generation — saves a click for the common case
+          // (paste as-is). Copy Reply stays as the explicit re-copy once
+          // the draft's been edited in the textarea, since this initial
+          // write won't reflect any changes made after this point.
+          navigator.clipboard.writeText(res.replyText || "").then(() => {
+            replyCopiedMsg.textContent = "Copied — paste it in, then hit Done.";
+          }).catch(() => {
+            // Clipboard writes outside a direct click can be blocked by the
+            // browser depending on activation timing — Copy Reply below
+            // still works as a manual fallback if this silently no-ops.
+          });
           document.getElementById("copyReplyBtn").onclick = () => {
             navigator.clipboard.writeText(document.getElementById("replyDraftBox").value);
-            document.getElementById("replyCopiedMsg").textContent = "Copied — paste it in, then hit Done.";
+            replyCopiedMsg.textContent = "Copied — paste it in, then hit Done.";
           };
           // Separate from Copy on purpose — copying is easy to do more than
           // once while tweaking the text in the box first; Done is the
