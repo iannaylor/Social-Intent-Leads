@@ -50,9 +50,9 @@ let lastAutoLoadedPostUrl = null;
 // it's opened, so the auto-open used to fire on EVERY open — including
 // just glancing at the panel while working on something else entirely,
 // yanking the browser over to LinkedIn and stealing focus from whatever
-// tab was active. Same lifetime as lastAutoLoadedPostUrl (resets when the
-// panel closes and reopens); once true for this session, the existing
-// auto-advance-on-Mark-Done flow continues working exactly as before.
+// tab was active. Persisted (see switchView's comment on currentView, same
+// underlying per-tab-panel reset risk) so a mid-session reset doesn't
+// force clicking Start again on top of losing the current view.
 let queueSessionStarted = false;
 
 navQueueBtn.onclick = () => { setQueueFilter(null, () => switchView("queue")); }; // global Queue tab always shows everything
@@ -73,6 +73,17 @@ function viewQueueForProfile(p) {
 
 function switchView(view) {
   currentView = view;
+  // Chrome's side panel is opened per-tab (background.js's
+  // setPanelEnabledForTab), which means switching the ACTIVE tab can swap
+  // to a genuinely different panel document instance — a fresh popup.html
+  // load with none of this session's in-memory state. Live feedback
+  // (2026-07-21): opening a reply from Follow-ups calls openInWorkingTab,
+  // which activates the working LinkedIn tab — if the panel had been
+  // showing for a different tab up to that point, that tab-focus change
+  // was enough to reset the panel back to its default Queue view mid-flow.
+  // Persisting the view and restoring it on load (below) survives that
+  // reset regardless of which tab the fresh instance loads for.
+  chrome.storage.local.set({ currentView: view });
   navQueueBtn.classList.toggle("active", view === "queue");
   navFollowupsBtn.classList.toggle("active", view === "followups");
   navProfilesBtn.classList.toggle("active", view === "profiles");
@@ -635,6 +646,7 @@ function renderFromQueue() {
         `;
         document.getElementById("startQueueBtn").onclick = () => {
           queueSessionStarted = true;
+          chrome.storage.local.set({ queueSessionStarted: true });
           renderFromQueue();
         };
         return;
@@ -1865,4 +1877,20 @@ chrome.tabs.onActivated.addListener(queryContentScriptState);
 setInterval(queryContentScriptState, 3000);
 
 // ---------- INIT ----------
-renderQueueView();
+// Restore whatever view/state was last active before rendering anything —
+// see switchView's comment above on why a fresh document load doesn't
+// necessarily mean the user actually wants to be back on the Queue tab.
+chrome.storage.local.get(["currentView", "queueSessionStarted"], (r) => {
+  queueSessionStarted = !!r.queueSessionStarted;
+  const view = r.currentView || "queue";
+  navQueueBtn.classList.toggle("active", view === "queue");
+  navFollowupsBtn.classList.toggle("active", view === "followups");
+  navProfilesBtn.classList.toggle("active", view === "profiles");
+  navProductsBtn.classList.toggle("active", view === "products");
+  currentView = view;
+  if (view === "queue") renderQueueView();
+  else if (view === "followups") renderFollowupsView();
+  else if (view === "profiles") renderProfilesView();
+  else if (view === "products") renderProductsView();
+  else renderSettingsView();
+});
