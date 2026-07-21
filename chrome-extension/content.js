@@ -370,6 +370,23 @@ function _findRepliesUnderOwnComment() {
         log(`  own-comment #${i}: climbed to depth ${depth}, text length ${wrapperText.length} exceeds cap, stopping`);
         break;
       }
+      // "Comes after our comment in document order" stops meaning "is a
+      // reply to us" once the wrapper has climbed past our own comment's
+      // own reply thread into the shared list holding every top-level
+      // comment on the post — at that point ANYONE who commented later
+      // satisfies the document-order check, not just replies to us. Live
+      // bug (2026-07-21): with no real reply to us on this post, the climb
+      // kept going until it reached that shared container and matched two
+      // other people's entirely unrelated exchange as if it were a reply.
+      // More than one other comment's own "Reply" action button appearing
+      // in the wrapper is the signal that's happened — our own comment
+      // contributes one, a genuine single reply to us contributes another,
+      // anything past that means multiple unrelated comments got swept in.
+      const replyCount = (wrapperText.match(/\bReply\b/g) || []).length;
+      if (replyCount > 2) {
+        log(`  own-comment #${i}: wrapper at depth ${depth} contains ${replyCount} "Reply" actions — spans other people's comments too, stopping`);
+        break;
+      }
       const candidateLinks = Array.from(el.querySelectorAll('a[href*="/in/"]')).filter((a) => {
         const t = _cleanText(a);
         if (!t || _isOwnName(t)) return false;
