@@ -45,6 +45,15 @@ const sessionStatusOverrides = {};
 // reset on view switches — returning to Queue with the same item on top
 // shouldn't re-fire either.
 let lastAutoLoadedPostUrl = null;
+// Gates the auto-open-tab behavior below it behind an explicit click.
+// Live feedback (2026-07-21): the panel's script re-runs fresh every time
+// it's opened, so the auto-open used to fire on EVERY open — including
+// just glancing at the panel while working on something else entirely,
+// yanking the browser over to LinkedIn and stealing focus from whatever
+// tab was active. Same lifetime as lastAutoLoadedPostUrl (resets when the
+// panel closes and reopens); once true for this session, the existing
+// auto-advance-on-Mark-Done flow continues working exactly as before.
+let queueSessionStarted = false;
 
 navQueueBtn.onclick = () => { setQueueFilter(null, () => switchView("queue")); }; // global Queue tab always shows everything
 navFollowupsBtn.onclick = () => switchView("followups");
@@ -612,13 +621,32 @@ function renderFromQueue() {
 
       const item = remaining[0];
       const isSkip = item.action === "skip";
+
+      // Nothing that touches the browser (tab switching, clipboard) fires
+      // until this is explicitly started — see queueSessionStarted above.
+      if (!queueSessionStarted) {
+        progressEl.textContent = `${doneActionable} / ${actionable.length} done — ${remaining.length} left in queue`;
+        contentEl.innerHTML = `
+          <div id="doneScreen">
+            <div style="margin-bottom:12px;">${remaining.length} item${remaining.length === 1 ? "" : "s"} ready to review, starting with <strong>${item.name}</strong>.</div>
+            <button id="startQueueBtn" class="primary">Start reviewing →</button>
+            <div class="helpText" style="margin-top:8px;">Opens LinkedIn to the first post and copies its comment — nothing happens until you click this.</div>
+          </div>
+        `;
+        document.getElementById("startQueueBtn").onclick = () => {
+          queueSessionStarted = true;
+          renderFromQueue();
+        };
+        return;
+      }
+
       const isConnect = item.action === "comment+connect";
       progressEl.textContent = `${doneActionable} / ${actionable.length} done — ${remaining.length} left in queue`;
 
-      // Arriving at a new current item — opening the Queue tab, or landing
-      // here after Mark Done advances — should be signal enough to load
-      // the post and have its comment ready to paste. No separate manual
-      // "Open Post" / "Copy Comment" click should be required first.
+      // Arriving at a new current item — advancing after Mark Done, once a
+      // session has been explicitly started — should be signal enough to
+      // load the post and have its comment ready to paste. No separate
+      // manual "Open Post" / "Copy Comment" click needed after that.
       if (!isSkip && item.postUrl !== lastAutoLoadedPostUrl) {
         lastAutoLoadedPostUrl = item.postUrl;
         if (item.comment) {
