@@ -349,29 +349,46 @@ function _findRepliesUnderOwnComment() {
   const results = [];
   headings.forEach((heading, i) => {
     const ownContainer = _boundedContainer(heading, OWN_NAME.length + 15, 2000, 6);
-    const parent = ownContainer.parentElement;
-    if (!parent) return;
 
-    const candidateLinks = Array.from(parent.querySelectorAll('a[href*="/in/"]')).filter((a) => {
-      const t = _cleanText(a);
-      if (!t || _isOwnName(t)) return false;
-      // Must come AFTER our own comment in document order — otherwise
-      // this picks up an earlier, unrelated commenter instead of a reply.
-      return !!(ownContainer.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
-    });
-    if (!candidateLinks.length) {
-      log(`  own-comment #${i}: no distinct profile link found after it — no reply (yet)`);
+    // Climb progressively from ownContainer, same technique
+    // _findReplyAuthorNear uses for the mention-based path, instead of
+    // checking only a single fixed parent level. Live bug (2026-07-21): a
+    // single parent hop wasn't always wide enough to reach the reply —
+    // LinkedIn's comment nesting depth varies from thread to thread, and
+    // this one needed climbing further than one level to find it.
+    let el = ownContainer;
+    let found = null;
+    for (let depth = 0; depth < 10 && el.parentElement; depth++) {
+      el = el.parentElement;
+      const wrapperText = _cleanText(el);
+      if (wrapperText.length > 4000) {
+        log(`  own-comment #${i}: climbed to depth ${depth}, text length ${wrapperText.length} exceeds cap, stopping`);
+        break;
+      }
+      const candidateLinks = Array.from(el.querySelectorAll('a[href*="/in/"]')).filter((a) => {
+        const t = _cleanText(a);
+        if (!t || _isOwnName(t)) return false;
+        // Must come AFTER our own comment in document order — otherwise
+        // this picks up an earlier, unrelated commenter instead of a reply.
+        return !!(ownContainer.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      if (candidateLinks.length) {
+        found = { authorLink: candidateLinks[0], wrapperText };
+        log(`  own-comment #${i}: found distinct profile link "${_cleanText(candidateLinks[0])}" at depth ${depth} (wrapper text length ${wrapperText.length})`);
+        break;
+      }
+    }
+    if (!found) {
+      log(`  own-comment #${i}: no distinct profile link found within climb — no reply (yet)`);
       return;
     }
-    const authorLink = candidateLinks[0];
-    const replyAuthor = _cleanText(authorLink);
-    const bodyContainer = _boundedContainer(authorLink, replyAuthor.length + 5, 2000, 5);
-    const bodyText = _cleanText(bodyContainer);
-    if (!_looksLikeCommentReply(bodyText)) {
-      log(`  own-comment #${i}: nearest profile link "${replyAuthor}" has no "Reply" action nearby — not a real comment, skipping`);
+    if (!_looksLikeCommentReply(found.wrapperText)) {
+      log(`  own-comment #${i}: nearest profile link has no "Reply" action nearby — not a real comment, skipping`);
       return;
     }
-    const replyText = bodyText.replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
+    const replyAuthor = _cleanText(found.authorLink);
+    const bodyContainer = _boundedContainer(found.authorLink, replyAuthor.length + 5, 2000, 5);
+    const replyText = _cleanText(bodyContainer).replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
     log(`  own-comment #${i}: structural match — reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
     if (replyText) results.push({ replyAuthor, replyText });
   });
