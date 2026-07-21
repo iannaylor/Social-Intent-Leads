@@ -81,6 +81,19 @@ def _item_to_fields(item: dict, run_id: Optional[str] = None) -> dict:
         value = item.get(key)
         if value is None:
             continue
+        if key == "name" and isinstance(value, str):
+            # Collapse whitespace at this single write funnel (every
+            # Leads-table write already passes through here) instead of
+            # only patching read-side queries defensively after the fact.
+            # Live bug (2026-07-21): a scraped name landed with a double
+            # space ("Victoria  Olamide"), invisible in Airtable's own
+            # grid view (rendered HTML collapses repeated whitespace
+            # visually) but real in the stored string, breaking every
+            # exact-match name lookup against it. Prevents new records
+            # from getting this artifact; get_item_by_name's own
+            # REGEX_REPLACE still guards existing ones written before
+            # this fix.
+            value = " ".join(value.split())
         fields[field_name] = value
     return fields
 
