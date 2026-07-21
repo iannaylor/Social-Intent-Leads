@@ -696,8 +696,10 @@ function renderFromQueue() {
         html += `
           <div class="label">Comment</div>
           <textarea id="commentBox">${item.comment || ""}</textarea>
+          <div id="regenerateMsg" style="font-size:11px;min-height:14px;"></div>
           <div class="row">
             <button id="copyCommentBtn">Copy Comment</button>
+            <button id="regenerateCommentBtn">${ICONS.zap} Regenerate</button>
           </div>
         `;
         if (isConnect) {
@@ -784,6 +786,44 @@ function renderFromQueue() {
           () => document.getElementById("commentBox").value,
           copiedMsg
         );
+        // Live feedback (2026-07-21): a handful of pre-fix records have a
+        // permanently blank Comment (the empty-draft bug fixed in pipeline
+        // v1.6.0), and there was no way to recover one short of manually
+        // editing Airtable. Reuses the same /queue/generate-comment
+        // endpoint the skip-item "Generate Comment Anyway" flow already
+        // uses — it isn't actually gated on the item being a skip, it just
+        // needs postUrl + stored commentary, so it works here unchanged.
+        const regenerateBtn = document.getElementById("regenerateCommentBtn");
+        const regenerateMsg = document.getElementById("regenerateMsg");
+        getBackendConfig((cfg) => {
+          if (!cfg.configured) {
+            regenerateBtn.disabled = true;
+            return;
+          }
+          regenerateBtn.onclick = () => {
+            regenerateBtn.disabled = true;
+            regenerateMsg.textContent = "Generating…";
+            regenerateMsg.style.color = "#555";
+            fetch(`${cfg.url}/queue/generate-comment`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+              body: JSON.stringify({ postUrl: item.postUrl }),
+            })
+              .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+              .then((res) => {
+                item.comment = res.comment;
+                document.getElementById("commentBox").value = res.comment || "";
+                regenerateMsg.textContent = "Regenerated.";
+                regenerateMsg.style.color = "#0a7d2c";
+                regenerateBtn.disabled = false;
+              })
+              .catch((e) => {
+                regenerateMsg.textContent = `Failed: ${e}`;
+                regenerateMsg.style.color = "#b8003c";
+                regenerateBtn.disabled = false;
+              });
+          };
+        });
       }
       if (isConnect) {
         document.getElementById("copyConnectBtn").onclick = copyBtnHandler(
