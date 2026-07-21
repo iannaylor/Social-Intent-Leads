@@ -80,6 +80,11 @@ function _extractActivityId(url) {
     /activity[:-](\d+)/, // /posts/user_slug-activity-1234567890-abcd
     /urn:li:ugcPost:(\d+)/, // /feed/update/urn:li:ugcPost:1234567890/
     /urn%3Ali%3AugcPost%3A(\d+)/, // same, URL-encoded
+    // Live bug (2026-07-21): a different /posts/ permalink shape LinkedIn
+    // also generates — /posts/{author-slug}_{title-slug}-share-{id}-{suffix}/
+    // — matched none of the above, so content.js silently gave up on the
+    // whole page (no reply-detection at all) for this URL shape.
+    /-share-(\d+)-/, // /posts/user_slug_title-share-1234567890-abcd
   ];
   for (const re of patterns) {
     const m = url.match(re);
