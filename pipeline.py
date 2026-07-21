@@ -287,6 +287,7 @@ async def process_batch(
         "emailsVerified": 0,
         "queuedCommentOnly": 0,
         "queuedConnect": 0,
+        "draftFailed": 0,
     }
 
     if not batch:
@@ -512,17 +513,33 @@ async def process_batch(
             limit=5,
         )
         for c, draft in zip(qualified, draft_results):
-            if isinstance(draft, Exception):
+            # ICP qualification (STEP 4, above) already finalized c["action"]
+            # as "comment"/"comment+connect" — that's a separate, independent
+            # step from drafting here, and nothing previously linked a
+            # drafting failure back to it. Live bug (2026-07-20): a
+            # qualified, non-skip item reached the Queue with a permanently
+            # empty Comment field because draft_content() either threw
+            # (caught below, comment left None) or returned a technically
+            # valid but empty string (no non-empty check existed) — either
+            # way the action was written to Airtable unchanged, giving a
+            # real lead with nothing to actually post. Flip back to "skip"
+            # in both cases instead of persisting an action with no comment
+            # to back it up.
+            comment_text = None if isinstance(draft, Exception) else (draft.get("comment") or "").strip()
+            if not comment_text:
+                c["action"] = "skip"
+                c["skipReason"] = "Comment drafting failed" if isinstance(draft, Exception) else "Comment drafting returned empty"
                 c["comment"] = None
+                report["draftFailed"] += 1
                 continue
-            c["comment"] = draft.get("comment")
+            c["comment"] = comment_text
             c["connectionNote"] = draft.get("connectionNote")
             c["dmMessage"] = draft.get("dmMessage")
             if c["action"] == "comment+connect":
                 report["queuedConnect"] += 1
             else:
                 report["queuedCommentOnly"] += 1
-        report["qualified"] = len(qualified)
+        report["qualified"] = len(qualified) - report["draftFailed"]
         print(f"[pipeline] run {run_id}: STEP 6 done", flush=True)
 
     # ---- write back ----

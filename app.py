@@ -268,15 +268,24 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
 
     voice_profile = await voice_store.get_voice_profile(api_key)
     product_config = await products_store.get_product_config(item["product"])
-    draft = await claude_client.draft_content(
-        product_config,
-        item["commentary"],
-        item.get("score", 0),
-        item.get("isInfluencer", False),
-        "comment",
-        None,
-        voice_profile,
-    )
+    try:
+        draft = await claude_client.draft_content(
+            product_config,
+            item["commentary"],
+            item.get("score", 0),
+            item.get("isInfluencer", False),
+            "comment",
+            None,
+            voice_profile,
+        )
+    except Exception as e:
+        # draft_content() now raises on an empty comment (previously it
+        # would have silently returned one, writing a blank Comment field
+        # with no way to tell from the UI that drafting actually failed —
+        # same class of bug fixed in pipeline.py's batch path). Surface it
+        # as a clean error here too instead of a raw unhandled 500, so the
+        # "Generate Comment Anyway" click visibly fails and can be retried.
+        raise HTTPException(status_code=502, detail=f"Comment drafting failed: {e}")
     await airtable_store.update_items(
         [
             {

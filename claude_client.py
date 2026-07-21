@@ -273,7 +273,18 @@ async def draft_content(
         tool_choice={"type": "tool", "name": "submit_draft"},
         messages=[{"role": "user", "content": context}],
     )
-    return _extract_tool_input(resp, "submit_draft")
+    result = _extract_tool_input(resp, "submit_draft")
+    # DRAFT_TOOL marks "comment" required but has no minLength, so a
+    # response with comment: "" satisfies the schema without erroring —
+    # same class of gap score_post() already guards against for "score"
+    # above. Live bug (2026-07-20): a qualified, non-skip candidate reached
+    # the Queue with a permanently empty Comment field because this came
+    # back empty and nothing caught it. Raising here routes it into the
+    # same caught-per-candidate-failure path pipeline.py already has for a
+    # thrown exception, instead of silently passing an empty draft through.
+    if not (result.get("comment") or "").strip():
+        raise ValueError("submit_draft returned an empty comment")
+    return result
 
 
 REPLY_SYSTEM_PROMPT = """You are continuing a LinkedIn comment conversation.
