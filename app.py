@@ -385,6 +385,31 @@ async def overlay_quick_add(body: dict, authorization: str = Header(default=""))
     return {"comment": draft.get("comment")}
 
 
+@app.get("/queue/lookup-by-name")
+async def lookup_by_name(name: str, authorization: str = Header(default="")):
+    """Resolves a person's name to their stored record — for surfaces with
+    no post link at all to go on, e.g. a LinkedIn DIRECT MESSAGE ('thanks
+    for your comment on my post') with nothing but the sender's name.
+    /queue/draft-reply already does its own lookup once given a postUrl,
+    so this only needs to bridge name -> postUrl; nothing else duplicates
+    that endpoint's logic."""
+    require_auth(authorization)
+    item = await airtable_store.get_item_by_name(name)
+    if not item:
+        raise HTTPException(status_code=404, detail="No record found for that name")
+    # postText/ownComment included directly — /queue/draft-reply validates
+    # "at least one of postText/ownComment" BEFORE it does its own
+    # postUrl lookup, so a caller working from a name (no scraped page
+    # content at all) needs to pass these through itself rather than
+    # relying on that endpoint's internal enrichment alone.
+    return {
+        "postUrl": item.get("postUrl"),
+        "name": item.get("name"),
+        "postText": item.get("commentary"),
+        "ownComment": item.get("comment"),
+    }
+
+
 @app.post("/queue/draft-reply")
 async def draft_reply(body: dict, authorization: str = Header(default="")):
     """Someone replied to a comment already left on their post — the

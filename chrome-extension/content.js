@@ -518,10 +518,71 @@ function _scanNotifications() {
   }
 }
 
+// ---------- MESSAGING THREAD SCANNING ----------
+// A LinkedIn DIRECT MESSAGE referencing "your comment on my post" has no
+// post link embedded in it at all — the only way to recover what it's
+// about is to resolve the sender's name against our own stored records
+// (backend GET /queue/lookup-by-name), then reuse the exact same
+// /queue/draft-reply flow already used for comment-thread replies, once
+// that lookup hands back a postUrl.
+//
+// NEEDS LIVE VERIFICATION — LinkedIn's messaging UI has not been
+// exercised anywhere else in this file (unlike the feed/notifications
+// selectors, which were iterated on live repeatedly). This is a first
+// attempt using the same "a name is linked to /in/..." structural anchor
+// proven elsewhere, plus a best-effort guess at "the latest substantial
+// text block on the page" for the message body — logs heavily so a live
+// test can pinpoint exactly what's wrong if the guess is off.
+let _lastReportedDmSignature = null;
+
+function _scanMessagingThread() {
+  if (!OWN_NAME) {
+    log("messaging: OWN_NAME not set, skipping");
+    return;
+  }
+
+  const otherLink = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((a) => {
+    const t = _cleanText(a);
+    return t && !_isOwnName(t);
+  });
+  if (!otherLink) {
+    log("messaging: no distinct /in/ profile link found on this thread — can't identify the other party");
+    return;
+  }
+  const otherName = _cleanText(otherLink);
+
+  // Best-effort "latest message" guess: the last reasonably-sized leaf
+  // text block on the page. Deliberately not scoped to a specific
+  // message-list container (untested/unknown class names) — logs the
+  // full candidate count so a live test shows whether this needs
+  // narrowing.
+  const candidates = Array.from(document.querySelectorAll("p, span, div")).filter((el) => {
+    if (el.children.length > 0) return false;
+    const t = _cleanText(el);
+    return t.length > 15 && t.length < 2000;
+  });
+  if (!candidates.length) {
+    log(`messaging: found thread with "${otherName}" but no message text candidates`);
+    return;
+  }
+  const messageText = _cleanText(candidates[candidates.length - 1]);
+  const signature = `${otherName}|${messageText}`;
+  if (signature === _lastReportedDmSignature) return;
+  _lastReportedDmSignature = signature;
+
+  log(`messaging: detected thread with "${otherName}" (${candidates.length} text candidate(s)), latest: "${messageText.slice(0, 150)}"`);
+  _safeSendMessage({ type: "SOCIAL_INTENT_DM_DETECTED", otherName, messageText });
+}
+
 function _report() {
   if (location.pathname.startsWith("/notifications")) {
     _scanNotifications();
     return; // no single "post" on this page to run reply-detection against
+  }
+
+  if (location.pathname.startsWith("/messaging/")) {
+    _scanMessagingThread();
+    return; // no post/comment on this page type either
   }
 
   const activityId = _extractActivityId(location.href);

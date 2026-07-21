@@ -47,6 +47,11 @@
   #replyBanner .replyBannerText { color: #555; margin-bottom: 8px; font-style: italic; }
   #replyBanner textarea { width: 100%; box-sizing: border-box; min-height: 60px; font-size: 12px; margin-bottom: 6px; }
   #replyBanner .row { display: flex; gap: 6px; }
+  #dmBanner { background: #eef2ff; border: 1px solid #b8c2f0; border-radius: 8px; padding: 10px; margin-bottom: 10px; font-size: 12px; }
+  #dmBanner .replyBannerHeader { font-weight: 600; margin-bottom: 4px; }
+  #dmBanner .replyBannerText { color: #555; margin-bottom: 8px; font-style: italic; }
+  #dmBanner textarea { width: 100%; box-sizing: border-box; min-height: 60px; font-size: 12px; margin-bottom: 6px; }
+  #dmBanner .row { display: flex; gap: 6px; }
   .lastScanStats { font-size: 11px; color: #888; margin-bottom: 6px; }
   .pendingPreview { margin-bottom: 6px; }
   .previewLine { font-size: 11px; color: #666; line-height: 1.4; }
@@ -86,6 +91,7 @@
     <button id="navProducts">Products</button>
   </div>
   <div id="replyBanner" style="display:none;"></div>
+  <div id="dmBanner" style="display:none;"></div>
   <div id="progress"></div>
   <div id="content"></div>
   <script src="popup.js"></script>

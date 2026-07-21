@@ -136,6 +136,26 @@ async def get_item_by_post_url(post_url: str, base_id: Optional[str] = None, api
         return _record_to_item(records[0]) if records else None
 
 
+async def get_item_by_name(name: str, base_id: Optional[str] = None, api_key: Optional[str] = None) -> Optional[dict]:
+    """Single-record lookup by person name rather than postUrl — for
+    contexts with no post link available at all, e.g. a LinkedIn DIRECT
+    MESSAGE referencing 'your comment on my post' with nothing but the
+    sender's name to go on. Best-effort: names aren't unique, so this
+    just returns whatever Airtable hands back first rather than trying to
+    disambiguate multiple people sharing a name."""
+    escaped = name.replace("'", "\\'")
+    filter_formula = f"{{{FIELD_NAMES['name']}}} = '{escaped}'"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            _url(base_id),
+            headers=_headers(api_key),
+            params={"filterByFormula": filter_formula, "maxRecords": 1},
+        )
+        resp.raise_for_status()
+        records = resp.json().get("records", [])
+        return _record_to_item(records[0]) if records else None
+
+
 async def upsert_items(
     items: list[dict], run_id: str, base_id: Optional[str] = None, api_key: Optional[str] = None
 ) -> dict:

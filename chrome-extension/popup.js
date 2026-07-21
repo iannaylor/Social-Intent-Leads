@@ -1983,6 +1983,8 @@ if (chrome.runtime && chrome.runtime.onMessage) {
       addNotificationLeads(msg.items, () => {
         if (currentView === "followups") renderFollowupsView();
       });
+    } else if (msg.type === "SOCIAL_INTENT_DM_DETECTED") {
+      processDmMessage(msg);
     } else if (msg.type === "SOCIAL_INTENT_POST_CHANGED") {
       // Navigated to a different post — a banner left over from whatever
       // was open before is now stale and, worse, misleading (it can read
@@ -1999,6 +2001,115 @@ if (chrome.runtime && chrome.runtime.onMessage) {
       }
     }
   });
+}
+
+// ---------- DM DETECTION ----------
+// content.js watches LinkedIn messaging threads for one referencing "your
+// comment on my post" — with no post link in the message itself, the only
+// way to recover context is a name lookup against our own stored records
+// (GET /queue/lookup-by-name), then the exact same /queue/draft-reply flow
+// already used for comment-thread replies. Kept in its own banner/state,
+// separate from the post-reply banner above, since the two can't overlap
+// (a messaging thread and a post page are never the same tab) but sharing
+// one banner's state machine would still risk one clearing the other's
+// content on an unrelated event.
+let currentDmSignature = null;
+
+function processDmMessage(msg) {
+  const signature = `${msg.otherName}|${msg.messageText}`;
+  if (signature === currentDmSignature) return; // already showing this one
+  console.log("[social-intent] popup received DM message:", msg);
+  currentDmSignature = signature;
+  getBackendConfig((cfg) => {
+    if (!cfg.configured) {
+      renderDmBanner(msg.otherName, msg.messageText, null, "Cloud mode only — configure a backend in Settings.");
+      return;
+    }
+    fetch(`${cfg.url}/queue/lookup-by-name?name=${encodeURIComponent(msg.otherName)}`, {
+      headers: { Authorization: `Bearer ${cfg.apiKey}` },
+    })
+      .then((r) => {
+        if (r.status === 404) return null;
+        return r.ok ? r.json() : Promise.reject(r.status);
+      })
+      .then((found) => renderDmBanner(msg.otherName, msg.messageText, found, null))
+      .catch((e) => renderDmBanner(msg.otherName, msg.messageText, null, `Lookup failed: ${e}`));
+  });
+}
+
+function renderDmBanner(otherName, messageText, found, errorMsg) {
+  const banner = document.getElementById("dmBanner");
+  banner.style.display = "block";
+  const closeBanner = () => {
+    banner.style.display = "none";
+    banner.innerHTML = "";
+    currentDmSignature = null;
+  };
+
+  if (errorMsg || !found) {
+    banner.innerHTML = `
+      <div class="replyBannerHeader">Message from ${otherName}</div>
+      <div class="replyBannerText">"${messageText}"</div>
+      <div class="helpText">${
+        errorMsg || `No matching record found for "${otherName}" — can't tell which post/comment this refers to, or draft a response without that context.`
+      }</div>
+      <div class="row"><button id="dismissDmBtn">Dismiss</button></div>
+    `;
+    document.getElementById("dismissDmBtn").onclick = closeBanner;
+    return;
+  }
+
+  banner.innerHTML = `
+    <div class="replyBannerHeader">${otherName} messaged you</div>
+    <div class="replyBannerText">"${messageText}"</div>
+    <div id="dmDraftArea"></div>
+    <div class="row">
+      <button id="dmOpenPostBtn">View Original Post</button>
+      <button id="draftDmBtn" class="primary">${ICONS.zap} Draft Response</button>
+      <button id="dismissDmBtn">Dismiss</button>
+    </div>
+  `;
+  document.getElementById("dismissDmBtn").onclick = closeBanner;
+  document.getElementById("dmOpenPostBtn").onclick = () => openInWorkingTab(found.postUrl);
+  document.getElementById("draftDmBtn").onclick = () => {
+    const btn = document.getElementById("draftDmBtn");
+    const draftArea = document.getElementById("dmDraftArea");
+    btn.disabled = true;
+    draftArea.innerHTML = `<div class="helpText">Drafting…</div>`;
+    getBackendConfig((cfg) => {
+      fetch(`${cfg.url}/queue/draft-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({
+          postUrl: found.postUrl,
+          replyText: messageText,
+          postText: found.postText,
+          ownComment: found.ownComment,
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+        .then((res) => {
+          const draft = res.replyText || "";
+          draftArea.innerHTML = `
+            <textarea id="dmDraftBox">${draft}</textarea>
+            <div class="row"><button id="copyDmDraftBtn" class="primary">Copy Reply</button></div>
+            <div id="dmCopiedMsg" style="font-size:11px;color:#0a7d2c;min-height:14px;margin-top:4px;"></div>
+          `;
+          navigator.clipboard.writeText(draft).then(() => {
+            document.getElementById("dmCopiedMsg").textContent = "Copied — paste it into the message box.";
+          }).catch(() => {});
+          document.getElementById("copyDmDraftBtn").onclick = () => {
+            navigator.clipboard.writeText(document.getElementById("dmDraftBox").value);
+            document.getElementById("dmCopiedMsg").textContent = "Copied — paste it into the message box.";
+          };
+          btn.disabled = false;
+        })
+        .catch((e) => {
+          draftArea.innerHTML = `<div class="helpText" style="color:#b8003c;">Failed: ${e}</div>`;
+          btn.disabled = false;
+        });
+    });
+  };
 }
 
 function renderReplyBanner(item, reply, activityId, postText, ownComment) {
