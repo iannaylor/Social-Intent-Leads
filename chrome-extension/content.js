@@ -664,11 +664,28 @@ function _scanFeedForIntentMatches() {
   let checked = 0;
   let skippedShort = 0;
   let skippedLong = 0;
+  let skippedNoId = 0;
 
   postLinks.forEach((link) => {
-    const activityId = _extractActivityId(link.getAttribute("href") || "");
-    if (!activityId || seenActivityIds.has(activityId)) return;
-    seenActivityIds.add(activityId);
+    const href = link.getAttribute("href") || "";
+    const activityId = _extractActivityId(href);
+    // Live bug (2026-07-21): on a search-results page (origin=CLUSTER_EXPANSION
+    // and possibly others), every candidate link's href failed to match any
+    // of _extractActivityId's known patterns, silently dropping every post
+    // on the page before the scan ever got to check its text — the overlay
+    // never fires on such pages, not because of anything about the post
+    // content. activityId here is only ever used as a dedup key (postUrl
+    // sent downstream already uses href directly, not this), so falling
+    // back to the raw href when no numeric ID can be parsed out of it keeps
+    // dedup working without requiring a URL shape match.
+    const dedupKey = activityId || href;
+    if (!dedupKey) return;
+    if (!activityId) {
+      skippedNoId++;
+      log(`overlay: no activity ID pattern matched, using raw href as dedup key: ${href}`);
+    }
+    if (seenActivityIds.has(dedupKey)) return;
+    seenActivityIds.add(dedupKey);
 
     // Climb to a post-card-sized container — same proven technique as
     // notification cards, just with a bigger target size since a full
@@ -726,7 +743,7 @@ function _scanFeedForIntentMatches() {
     }
   });
   log(
-    `overlay: scan pass — ${postLinks.length} link(s) seen, ${checked} card(s) checked, ${skippedShort} too short, ${skippedLong} too long`
+    `overlay: scan pass — ${postLinks.length} link(s) seen, ${checked} card(s) checked, ${skippedShort} too short, ${skippedLong} too long, ${skippedNoId} used href fallback (no activity ID pattern matched)`
   );
 }
 
