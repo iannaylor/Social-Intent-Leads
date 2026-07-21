@@ -649,6 +649,9 @@ function _scanFeedForIntentMatches() {
 
   const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
   const seenActivityIds = new Set();
+  let checked = 0;
+  let skippedShort = 0;
+  let skippedLong = 0;
 
   postLinks.forEach((link) => {
     const activityId = _extractActivityId(link.getAttribute("href") || "");
@@ -657,18 +660,38 @@ function _scanFeedForIntentMatches() {
 
     // Climb to a post-card-sized container — same proven technique as
     // notification cards, just with a bigger target size since a full
-    // feed post's text is longer than a one-line notification.
+    // feed post's text is longer than a one-line notification. Live bug
+    // (2026-07-21): stopping at the FIRST moment text crossed 150 chars
+    // meant the exact climb depth (and therefore whether the post's own
+    // body text was actually included yet) depended on incidental DOM
+    // shape — author name + a short headline alone can cross 150 chars
+    // before reaching the post body on some layouts, not others,
+    // producing inconsistent matches with no relation to keyword
+    // presence. Climbing further (same 4000-char outer cap as before)
+    // and preferring the same proven _extractCardText selectors used
+    // elsewhere in this file for the actual keyword check — falling back
+    // to the full climbed blob only if those selectors find nothing —
+    // ties matching to the post's real body text instead of wherever the
+    // climb happened to stop.
     let card = link;
     let cardText = "";
     for (let depth = 0; depth < 12 && card.parentElement; depth++) {
       card = card.parentElement;
       cardText = _cleanText(card);
-      if (cardText.length > 150) break;
-      if (cardText.length > 4000) return; // climbed too far, bail rather than mismark a huge chunk
+      if (cardText.length > 300) break;
+      if (cardText.length > 4000) {
+        skippedLong++;
+        return; // climbed too far, bail rather than mismark a huge chunk
+      }
     }
-    if (cardText.length < 50 || _overlayMarked.has(card)) return;
+    if (cardText.length < 50 || _overlayMarked.has(card)) {
+      if (cardText.length < 50) skippedShort++;
+      return;
+    }
+    checked++;
 
-    const haystack = cardText.toLowerCase();
+    const matchText = _extractCardText(card) || cardText;
+    const haystack = matchText.toLowerCase();
     let bestMatch = null;
     for (const product of cachedProductKeywords) {
       const strongHit = product.highIntentKeywords.find((kw) => haystack.includes(kw.toLowerCase()));
@@ -678,13 +701,21 @@ function _scanFeedForIntentMatches() {
         if (strongHit) break;
       }
     }
+    log(
+      `overlay: post ${activityId} — matchText ${matchText.length} chars — ${
+        bestMatch ? `MATCHED "${bestMatch.keyword}" (${bestMatch.product})` : "no keyword hit"
+      }`
+    );
 
     if (bestMatch) {
       _overlayMarked.add(card);
       const author = _findPostAuthor(card);
-      _injectOverlayBadge(card, bestMatch, { postUrl: link.href, postText: cardText, ...author });
+      _injectOverlayBadge(card, bestMatch, { postUrl: link.href, postText: matchText, ...author });
     }
   });
+  log(
+    `overlay: scan pass — ${postLinks.length} link(s) seen, ${checked} card(s) checked, ${skippedShort} too short, ${skippedLong} too long`
+  );
 }
 
 // Live feedback (2026-07-21): the badge used to be a pure visual flag
