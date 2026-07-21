@@ -659,55 +659,76 @@ function _findPostAuthor(card) {
 function _scanFeedForIntentMatches() {
   if (!overlayEnabled || !cachedProductKeywords || !cachedProductKeywords.length) return;
 
-  const postLinks = Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]'));
   const seenActivityIds = new Set();
+  const candidates = [];
+
+  // Strategy 1: real permalink links — proven on the main feed.
+  Array.from(document.querySelectorAll('a[href*="/feed/update/"], a[href*="/posts/"]')).forEach((link) => {
+    const href = link.getAttribute("href") || "";
+    const activityId = _extractActivityId(href);
+    // activityId here is only ever used as a dedup key (postUrl sent
+    // downstream already uses href directly, not this), so falling back
+    // to the raw href when no numeric ID can be parsed out of it keeps
+    // dedup working without requiring a URL shape match.
+    const dedupKey = activityId || href;
+    if (!dedupKey || seenActivityIds.has(dedupKey)) return;
+    seenActivityIds.add(dedupKey);
+    candidates.push({ startEl: link, activityId, postUrl: link.href });
+  });
+
+  // Strategy 2: data-urn attributes. Live bug (2026-07-21): on LinkedIn's
+  // dedicated /search/results/content/ page, the ONLY links matching
+  // strategy 1's selector across the whole page were unrelated
+  // company-page attribution links embedded inside shared articles
+  // elsewhere on the page — the actual visible posts exposed no matching
+  // link at all, so the scan never even considered them, regardless of
+  // keywords. data-urn is set directly on a post's own container by
+  // LinkedIn itself, independent of whether a permalink <a> happens to be
+  // present, and is a long-standing convention across feed/search/profile
+  // page types — a more reliable anchor than a specific href shape.
+  Array.from(document.querySelectorAll('[data-urn*="activity:"]')).forEach((el) => {
+    const m = (el.getAttribute("data-urn") || "").match(/activity:(\d+)/);
+    if (!m) return;
+    const activityId = m[1];
+    if (seenActivityIds.has(activityId)) return;
+    seenActivityIds.add(activityId);
+    candidates.push({
+      startEl: el,
+      activityId,
+      postUrl: `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/`,
+    });
+  });
+
   let checked = 0;
   let skippedShort = 0;
   let skippedLong = 0;
   let skippedNoId = 0;
 
-  postLinks.forEach((link) => {
-    const href = link.getAttribute("href") || "";
-    const activityId = _extractActivityId(href);
-    // Live bug (2026-07-21): on a search-results page (origin=CLUSTER_EXPANSION
-    // and possibly others), every candidate link's href failed to match any
-    // of _extractActivityId's known patterns, silently dropping every post
-    // on the page before the scan ever got to check its text — the overlay
-    // never fires on such pages, not because of anything about the post
-    // content. activityId here is only ever used as a dedup key (postUrl
-    // sent downstream already uses href directly, not this), so falling
-    // back to the raw href when no numeric ID can be parsed out of it keeps
-    // dedup working without requiring a URL shape match.
-    const dedupKey = activityId || href;
-    if (!dedupKey) return;
+  candidates.forEach(({ startEl, activityId, postUrl }) => {
     if (!activityId) {
       skippedNoId++;
-      log(`overlay: no activity ID pattern matched, using raw href as dedup key: ${href}`);
+      log(`overlay: no activity ID pattern matched, using raw href as dedup key: ${postUrl}`);
     }
-    if (seenActivityIds.has(dedupKey)) return;
-    seenActivityIds.add(dedupKey);
 
-    // Climb to a post-card-sized container — same proven technique as
-    // notification cards, just with a bigger target size since a full
-    // feed post's text is longer than a one-line notification. Live bug
-    // (2026-07-21): stopping at the FIRST moment text crossed 150 chars
-    // meant the exact climb depth (and therefore whether the post's own
-    // body text was actually included yet) depended on incidental DOM
-    // shape — author name + a short headline alone can cross 150 chars
-    // before reaching the post body on some layouts, not others,
-    // producing inconsistent matches with no relation to keyword
-    // presence. Climbing further (same 4000-char outer cap as before)
-    // and preferring the same proven _extractCardText selectors used
-    // elsewhere in this file for the actual keyword check — falling back
-    // to the full climbed blob only if those selectors find nothing —
-    // ties matching to the post's real body text instead of wherever the
-    // climb happened to stop.
-    let card = link;
-    let cardText = "";
-    for (let depth = 0; depth < 12 && card.parentElement; depth++) {
+    // Climb to a post-card-sized container. Checks the starting element's
+    // OWN text first (a data-urn container is often already the right
+    // size) before climbing, instead of always climbing at least once —
+    // that would overshoot for strategy 2's candidates, which — unlike a
+    // deeply-nested permalink link — frequently already ARE an
+    // appropriately-sized container. Live bug (2026-07-21): stopping at
+    // the FIRST moment text crossed 150 chars meant the exact climb depth
+    // (and therefore whether the post's own body text was actually
+    // included yet) depended on incidental DOM shape. Climbing further
+    // (300/4000-char thresholds) and preferring the same proven
+    // _extractCardText selectors used elsewhere in this file for the
+    // actual keyword check — falling back to the full climbed blob only
+    // if those selectors find nothing — ties matching to the post's real
+    // body text instead of wherever the climb happened to stop.
+    let card = startEl;
+    let cardText = _cleanText(card);
+    for (let depth = 0; depth < 12 && cardText.length <= 300 && card.parentElement; depth++) {
       card = card.parentElement;
       cardText = _cleanText(card);
-      if (cardText.length > 300) break;
       if (cardText.length > 4000) {
         skippedLong++;
         return; // climbed too far, bail rather than mismark a huge chunk
@@ -731,7 +752,7 @@ function _scanFeedForIntentMatches() {
       }
     }
     log(
-      `overlay: post ${activityId} — matchText ${matchText.length} chars — ${
+      `overlay: post ${activityId || "(no id)"} — matchText ${matchText.length} chars — ${
         bestMatch ? `MATCHED "${bestMatch.keyword}" (${bestMatch.product})` : "no keyword hit"
       }`
     );
@@ -739,11 +760,11 @@ function _scanFeedForIntentMatches() {
     if (bestMatch) {
       _overlayMarked.add(card);
       const author = _findPostAuthor(card);
-      _injectOverlayBadge(card, bestMatch, { postUrl: link.href, postText: matchText, ...author });
+      _injectOverlayBadge(card, bestMatch, { postUrl, postText: matchText, ...author });
     }
   });
   log(
-    `overlay: scan pass — ${postLinks.length} link(s) seen, ${checked} card(s) checked, ${skippedShort} too short, ${skippedLong} too long, ${skippedNoId} used href fallback (no activity ID pattern matched)`
+    `overlay: scan pass — ${candidates.length} candidate(s) seen, ${checked} card(s) checked, ${skippedShort} too short, ${skippedLong} too long, ${skippedNoId} had no parseable activity ID`
   );
 }
 
