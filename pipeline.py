@@ -560,3 +560,84 @@ async def process_batch(
     await airtable_store.update_items(update_payload, base_id, api_key)
     print(f"[pipeline] run {run_id}: PHASE 2 done. {report}", flush=True)
     return report
+
+
+async def retry_enrichment(
+    item: dict, voice_profile: dict | None = None, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> dict:
+    """Live feedback (2026-07-21): an enrich_profile API failure (a
+    transient RichAPI error, not an ICP mismatch) permanently skips a
+    candidate with no way to just try the same call again — only "accept
+    it anyway, unverified" (the existing /queue/generate-comment override)
+    existed, which is a different thing entirely from retrying the actual
+    verification step. This re-runs ICP qualification for ONE already-
+    stored item, same enrich_profile + company_enricher + title/size/
+    location logic process_batch's STEP 4 loop uses, and drafts a comment
+    if it now qualifies (same as STEP 6) — a genuine retry, not a bypass.
+
+    No original search profile is available at this point (only the
+    stored item and its product), so ICP falls back entirely to the
+    product's own titles/size/industries with no location filter — the
+    same fallback _resolve_icp already uses when a profile leaves those
+    fields blank."""
+    product_config = await get_product_config(item["product"], base_id, api_key)
+    icp_titles, icp_size_min, icp_size_max, _icp_industries, icp_location = _resolve_icp({}, product_config)
+
+    if not item.get("profileUrl"):
+        return {"action": "skip", "skipReason": "No LinkedIn profile URL available to verify title/company."}
+
+    async with RichAPIClient() as richapi:
+        try:
+            profile_data = await richapi.call("enrich_profile", {"url": item["profileUrl"]})
+        except Exception as e:
+            return {"action": "skip", "skipReason": f"Could not verify profile (enrich_profile failed): {e}"}
+
+        headline = profile_data.get("headline") or ""
+        title_ok = any(t.lower() in headline.lower() for t in icp_titles)
+
+        company = profile_data.get("company") or {}
+        domain = (company.get("website") or "").replace("https://", "").replace("http://", "").split("/")[0]
+        size_ok = None
+        employee_count = None
+        if domain:
+            try:
+                company_data = await richapi.call("company_enricher", {"domain": domain})
+                employee_count = company_data.get("employee_count")
+                if isinstance(employee_count, int):
+                    size_ok = icp_size_min <= employee_count <= icp_size_max
+            except Exception as e:
+                print(f"[pipeline] retry_enrichment: company_enricher failed for {domain}: {e}", flush=True)
+
+        location_ok = _location_matches(profile_data, icp_location)
+        location_fails = icp_location and location_ok is False
+
+        if not ((title_ok or size_ok) and not location_fails):
+            title_bit = f"'{headline}'" if headline else "unknown title"
+            size_bit = f"{employee_count} employees" if employee_count is not None else "unknown size"
+            reason = (
+                f"Outside ICP: {title_bit} at a company with {size_bit} "
+                f"(target: {', '.join(icp_titles)} / {icp_size_min}-{icp_size_max} employees)."
+            )
+            return {"action": "skip", "skipReason": reason}
+
+        action = "comment+connect" if item.get("connectReason") == "direct-buyer" else "comment"
+        try:
+            draft = await claude_client.draft_content(
+                product_config,
+                item.get("commentary") or "",
+                item.get("score", 0),
+                item.get("isInfluencer", False),
+                action,
+                item.get("connectReason"),
+                voice_profile,
+            )
+        except Exception as e:
+            return {"action": "skip", "skipReason": f"Passed ICP but comment drafting failed: {e}"}
+
+        return {
+            "action": action,
+            "skipReason": "",
+            "comment": draft.get("comment"),
+            "connectionNote": draft.get("connectionNote"),
+            "dmMessage": draft.get("dmMessage"),
+        }

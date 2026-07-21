@@ -301,6 +301,30 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
     return {"comment": draft.get("comment")}
 
 
+@app.post("/queue/retry-enrichment")
+async def retry_enrichment(body: dict, authorization: str = Header(default="")):
+    """A genuine retry, not an override: re-runs the actual ICP
+    verification (enrich_profile + company_enricher) for a candidate that
+    got skipped because that call failed transiently — distinct from
+    /queue/generate-comment, which bypasses verification entirely rather
+    than re-attempting it. Live feedback (2026-07-21): a RichAPI account
+    with plenty of credits remaining still hit an enrich_profile failure,
+    and there was no way to just try again short of a full batch re-run."""
+    api_key = require_auth(authorization)
+    post_url = body.get("postUrl")
+    if not post_url:
+        raise HTTPException(status_code=400, detail="postUrl is required")
+
+    item = await airtable_store.get_item_by_post_url(post_url)
+    if not item:
+        raise HTTPException(status_code=404, detail="No item with that postUrl")
+
+    voice_profile = await voice_store.get_voice_profile(api_key)
+    result = await pipeline.retry_enrichment(item, voice_profile)
+    await airtable_store.update_items([{"recordId": item["recordId"], **result}])
+    return result
+
+
 @app.post("/overlay/quick-add")
 async def overlay_quick_add(body: dict, authorization: str = Header(default="")):
     """The live-browsing overlay (content.js, opt-in) flags posts matching a

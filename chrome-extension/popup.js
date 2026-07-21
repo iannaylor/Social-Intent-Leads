@@ -687,10 +687,22 @@ function renderFromQueue() {
       }
 
       if (isSkip) {
+        // "Could not verify profile" means the enrich_profile API call
+        // itself failed (a transient RichAPI error) — distinct from a
+        // genuine "Outside ICP" skip, which is a stable fact about the
+        // person that re-checking won't change. Only offer Retry for the
+        // former; Generate Comment Anyway (a bypass, not a retry) stays
+        // available either way. Live feedback (2026-07-21): a RichAPI
+        // account with plenty of credits still hit this, with no way to
+        // just try the same call again short of a full batch re-run.
+        const isVerificationFailure = (item.skipReason || "").startsWith("Could not verify profile");
         html += `<div id="skipNote">Skip. ${item.skipReason || "No reason given."}</div>`;
         html += `
           <div id="generateMsg" style="font-size:11px;min-height:14px;"></div>
-          <div class="row"><button id="generateCommentBtn">${ICONS.zap} Generate Comment Anyway</button></div>
+          <div class="row">
+            ${isVerificationFailure ? `<button id="retryEnrichmentBtn">${ICONS.zap} Retry Verification</button>` : ""}
+            <button id="generateCommentBtn">${ICONS.zap} Generate Comment Anyway</button>
+          </div>
         `;
       } else {
         html += `
@@ -778,6 +790,36 @@ function renderFromQueue() {
                 generateBtn.disabled = false;
               });
           };
+
+          const retryBtn = document.getElementById("retryEnrichmentBtn");
+          if (retryBtn) {
+            retryBtn.onclick = () => {
+              retryBtn.disabled = true;
+              generateMsg.textContent = "Retrying verification…";
+              generateMsg.style.color = "#555";
+              fetch(`${cfg.url}/queue/retry-enrichment`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+                body: JSON.stringify({ postUrl: item.postUrl }),
+              })
+                .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+                .then((res) => {
+                  item.action = res.action;
+                  item.skipReason = res.skipReason || null;
+                  if (res.action !== "skip") {
+                    item.comment = res.comment;
+                    item.connectionNote = res.connectionNote;
+                    item.dmMessage = res.dmMessage;
+                  }
+                  renderFromQueue();
+                })
+                .catch((e) => {
+                  generateMsg.textContent = `Retry failed: ${e}`;
+                  generateMsg.style.color = "#b8003c";
+                  retryBtn.disabled = false;
+                });
+            };
+          }
         });
       }
 
