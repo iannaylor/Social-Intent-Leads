@@ -148,6 +148,36 @@ PRODUCTS_FIELDS = [
     text_field("ICP Industries"),
 ]
 
+PROFILES_TABLE = "Social Intent Search Profiles"
+PROFILES_FIELDS = [
+    text_field("Slug"),  # first field = primary field, stable identifier
+    text_field("Name"),
+    text_field("Product"),
+    number_field("Count"),
+    text_field("Titles"),
+    number_field("Company Size Min"),
+    number_field("Company Size Max"),
+    text_field("Company Type"),
+    text_field("Location"),
+    long_text_field("Intent Keywords"),
+    select_field("Recency", ["PAST_24H", "PAST_WEEK", "PAST_MONTH"]),
+    checkbox_field("Fetch Emails"),
+    # Runtime state — previously scattered across chrome.storage.local
+    # alongside the profile definition itself (pendingCount, the four
+    # lastScan* counters, lastRunAt/lastRunId). Centralized here too so
+    # this state also survives across installs/browsers, not just the
+    # profile's own settings. lastRunAt stays a raw epoch-ms number (what
+    # the client already produces via Date.now() and compares against),
+    # not a formatted date — no conversion needed either direction.
+    number_field("Last Run At"),
+    text_field("Last Run ID"),
+    number_field("Pending Count"),
+    number_field("Last Scan Found"),
+    number_field("Last Scan New"),
+    number_field("Last Scan Duplicate"),
+    number_field("Last Scan Skipped"),
+]
+
 VOICE_TABLE = "Social Intent Voice Profiles"
 VOICE_FIELDS = [
     text_field("API Key"),  # first field = primary field

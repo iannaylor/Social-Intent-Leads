@@ -39,6 +39,7 @@ from models import SearchProfile, ProcessBatchRequest
 import pipeline
 import airtable_store
 import products_store
+import profiles_store
 import claude_client
 import voice_store
 import voice_generator
@@ -70,6 +71,7 @@ async def _provision_airtable_tables():
     try:
         await airtable_setup.ensure_table(airtable_setup.LEADS_TABLE, airtable_setup.LEADS_FIELDS)
         await airtable_setup.ensure_table(airtable_setup.PRODUCTS_TABLE, airtable_setup.PRODUCTS_FIELDS)
+        await airtable_setup.ensure_table(airtable_setup.PROFILES_TABLE, airtable_setup.PROFILES_FIELDS)
         await airtable_setup.ensure_table(airtable_setup.VOICE_TABLE, airtable_setup.VOICE_FIELDS)
         print("[app] Airtable tables verified/created", flush=True)
     except Exception as e:
@@ -474,3 +476,25 @@ async def upsert_product(body: dict, authorization: str = Header(default="")):
     if not body.get("key") or not body.get("name"):
         raise HTTPException(status_code=400, detail="key and name are required")
     return await products_store.upsert_product(body)
+
+
+@app.get("/profiles")
+async def list_search_profiles(authorization: str = Header(default="")):
+    require_auth(authorization)
+    return {"profiles": await profiles_store.list_profiles()}
+
+
+@app.post("/profiles")
+async def upsert_search_profile(body: dict, authorization: str = Header(default="")):
+    require_auth(authorization)
+    if not body.get("slug") or not body.get("name"):
+        raise HTTPException(status_code=400, detail="slug and name are required")
+    return await profiles_store.upsert_profile(body)
+
+
+@app.delete("/profiles/{slug}")
+async def delete_search_profile(slug: str, authorization: str = Header(default="")):
+    require_auth(authorization)
+    if not await profiles_store.delete_profile(slug):
+        raise HTTPException(status_code=404, detail="No profile with that slug")
+    return {"ok": True}

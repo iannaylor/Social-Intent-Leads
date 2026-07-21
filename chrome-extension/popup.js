@@ -974,11 +974,104 @@ function renderNotifLeadsSection() {
 
 // ---------- SEARCH PROFILES VIEW ----------
 
+// Search profiles now live in Airtable via the backend (matching how
+// Products already do) instead of chrome.storage.local only — live
+// feedback (2026-07-21): having Products server-side/shared but Search
+// Profiles local-only-per-browser was an inconsistent split for the same
+// class of data, and meant a fresh browser/profile had zero search setup
+// with no way to recover it short of re-entering everything by hand.
+// Every existing call site in this file already goes through ONLY these
+// two functions with this exact callback shape, so changing what's
+// underneath them doesn't require touching those call sites. Local mode
+// (no backend configured) is completely unchanged — this only applies
+// once a backend is configured, same gating Products already uses.
+// chrome.storage.local is kept as a fast local cache and an offline
+// fallback, but Airtable is the source of truth once cloud mode is on.
+let _profilesMigrated = false;
+
 function getProfiles(cb) {
-  chrome.storage.local.get(["searchProfiles"], (r) => cb(r.searchProfiles || {}));
+  getBackendConfig((cfg) => {
+    if (!cfg.configured) {
+      chrome.storage.local.get(["searchProfiles"], (r) => cb(r.searchProfiles || {}));
+      return;
+    }
+    fetch(`${cfg.url}/profiles`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data) => {
+        const remote = {};
+        (data.profiles || []).forEach((p) => {
+          remote[p.slug] = p;
+        });
+        if (Object.keys(remote).length === 0 && !_profilesMigrated) {
+          _profilesMigrated = true;
+          chrome.storage.local.get(["searchProfiles"], (r) => {
+            const local = r.searchProfiles || {};
+            const slugs = Object.keys(local);
+            if (!slugs.length) {
+              cb(remote);
+              return;
+            }
+            // One-time migration: this browser has profiles from before
+            // Airtable-backed storage existed, and the backend has none
+            // yet — push them up once instead of silently losing them.
+            console.log(`[social-intent] migrating ${slugs.length} local search profile(s) to Airtable`);
+            Promise.all(
+              slugs.map((slug) =>
+                fetch(`${cfg.url}/profiles`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+                  body: JSON.stringify(local[slug]),
+                }).catch(() => null)
+              )
+            ).then(() => getProfiles(cb));
+          });
+          return;
+        }
+        cb(remote);
+        chrome.storage.local.set({ searchProfiles: remote }); // keep local cache warm
+      })
+      .catch(() => {
+        // Backend unreachable — fall back to the local cache rather than
+        // the whole Search tab going blank.
+        chrome.storage.local.get(["searchProfiles"], (r) => cb(r.searchProfiles || {}));
+      });
+  });
 }
+
 function saveProfiles(profiles, cb) {
-  chrome.storage.local.set({ searchProfiles: profiles }, cb);
+  chrome.storage.local.set({ searchProfiles: profiles }, cb); // local cache, always kept in sync
+  getBackendConfig((cfg) => {
+    if (!cfg.configured) return; // local mode: local storage IS the store, nothing further to do
+    fetch(`${cfg.url}/profiles`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data) => {
+        const remoteSlugs = (data.profiles || []).map((p) => p.slug);
+        const keepSlugs = new Set(Object.keys(profiles));
+        // Deletes: a slug present on the backend but no longer in the
+        // dict being saved (the delete-profile flow removes it from the
+        // dict first, then calls saveProfiles with what's left).
+        remoteSlugs
+          .filter((slug) => !keepSlugs.has(slug))
+          .forEach((slug) => {
+            fetch(`${cfg.url}/profiles/${encodeURIComponent(slug)}`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${cfg.apiKey}` },
+            }).catch((e) => console.error("[social-intent] failed to delete profile from backend:", slug, e));
+          });
+      })
+      .catch(() => {}); // best-effort — an upsert-only push below still keeps most state in sync
+    // Upserts: push every profile currently in the dict. Simplest correct
+    // approach for a handful of profiles at a time — some of these are
+    // no-op re-writes of unchanged profiles, a small inefficiency traded
+    // for not having to diff what specifically changed.
+    Object.values(profiles).forEach((p) => {
+      fetch(`${cfg.url}/profiles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify(p),
+      }).catch((e) => console.error("[social-intent] failed to sync profile to backend:", p.slug, e));
+    });
+  });
 }
 function slugify(name) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -1680,7 +1773,21 @@ function renderProductForm(cfg, existing) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify(payload),
     })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      // Previously rejected with the bare numeric status only — live bug
+      // (2026-07-21): a genuine failure (Airtable rejecting an unrecognized
+      // column) showed as an unhelpful "Save failed (500)" with the actual
+      // reason nowhere to be seen. Try to read the body's detail either way
+      // — a 500 from an unhandled backend exception won't always have a
+      // clean JSON error body, so this still falls back to the status code
+      // rather than breaking entirely if parsing fails.
+      .then((r) =>
+        r.ok
+          ? r.json()
+          : r
+              .json()
+              .then((body) => Promise.reject(body.detail || r.status))
+              .catch(() => Promise.reject(r.status))
+      )
       .then(() => renderProductsView())
       .catch((e) => {
         saveMsg.textContent = `Save failed (${e})`;
