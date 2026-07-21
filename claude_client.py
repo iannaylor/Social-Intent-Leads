@@ -170,6 +170,12 @@ Comment style rules — apply to every comment:
   exist for this") or 5 (direct, "worth checking out X"). At any other score, or for
   an influencer flagged below score 4, the public comment has NO product mention —
   product curiosity is reserved for the private DM only.
+- If you do name {product_name} and want to point them somewhere, cite exactly this
+  URL: {landing_page_url}. Never the bare root domain or a different path, even if
+  the positioning above happens to mention the domain in a shorter form elsewhere —
+  this is the specific page built for this audience, not the general homepage. If no
+  landing page URL is given (blank above), don't cite any URL at all — name the
+  product without a link rather than guessing one.
 - Sound like a real person typing, not a marketing team. Short, direct sentences.
 
 If action is "comment+connect", also draft a connectionNote (<=200 chars, LinkedIn's
@@ -253,6 +259,7 @@ async def draft_content(
     system = DRAFT_SYSTEM_PROMPT.format(
         product_name=product_config["name"],
         product_positioning=product_config["positioning"],
+        landing_page_url=product_config.get("landing_page_url") or "(none given)",
     )
     if voice_profile and voice_profile.get("voiceBrief"):
         system += VOICE_ADDENDUM.format(
@@ -343,7 +350,10 @@ _PRODUCT_MENTION_RULE = """- Only mention {product_name} by name if the ORIGINAL
   reply is just polite/conversational with no opening, keep building rapport
   instead, no product mention yet — better to earn a second exchange than force it.
 - If their reply reveals a real objection or reason this product wouldn't fit them,
-  don't paper over it. Acknowledge it honestly rather than pushing past it."""
+  don't paper over it. Acknowledge it honestly rather than pushing past it.
+- If you do name {product_name} and want to point them somewhere, cite exactly this
+  URL: {landing_page_url}. Never the bare root domain or a different path. If no
+  landing page URL is given (blank), don't cite any URL at all."""
 # No product identified — never guess or mention one. Pure rapport-building
 # continuation is always safe; a wrong product mention is not.
 _NO_PRODUCT_MENTION_RULE = "- No product context is available for this thread — do not name or imply any product. Keep this purely about continuing the conversation and building rapport."
@@ -362,7 +372,10 @@ async def draft_reply(
         product_section = _PRODUCT_SECTION.format(
             product_name=product_config["name"], product_positioning=product_config["positioning"]
         )
-        product_mention_rule = _PRODUCT_MENTION_RULE.format(product_name=product_config["name"])
+        product_mention_rule = _PRODUCT_MENTION_RULE.format(
+            product_name=product_config["name"],
+            landing_page_url=product_config.get("landing_page_url") or "(none given)",
+        )
     else:
         product_section = ""
         product_mention_rule = _NO_PRODUCT_MENTION_RULE

@@ -139,6 +139,7 @@ PRODUCTS_FIELDS = [
     text_field("Key"),  # first field = primary field
     text_field("Name"),
     long_text_field("Context"),
+    url_field("Landing Page URL"),
     text_field("Broad Keywords"),
     text_field("High Intent Keywords"),
     text_field("ICP Titles"),

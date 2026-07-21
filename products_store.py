@@ -23,6 +23,7 @@ FIELD_NAMES = {
     "key": "Key",
     "name": "Name",
     "context": "Context",
+    "landingPageUrl": "Landing Page URL",
     "broadKeywords": "Broad Keywords",
     "highIntentKeywords": "High Intent Keywords",
     "icpTitles": "ICP Titles",
@@ -56,6 +57,7 @@ def _to_config_shape(product: dict) -> dict:
     return {
         "name": product.get("name", product.get("key", "")),
         "positioning": product.get("context", ""),
+        "landing_page_url": product.get("landingPageUrl", ""),
         "broad_keywords": split(product.get("broadKeywords")),
         "high_intent_keywords": split(product.get("highIntentKeywords")),
         "icp_titles": split(product.get("icpTitles")),

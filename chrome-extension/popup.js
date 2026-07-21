@@ -1608,7 +1608,7 @@ function renderProductsView() {
 
 function renderProductForm(cfg, existing) {
   const p = existing || {
-    key: "", name: "", context: "", broadKeywords: "", highIntentKeywords: "",
+    key: "", name: "", context: "", landingPageUrl: "", broadKeywords: "", highIntentKeywords: "",
     icpTitles: "", icpCompanySizeMin: 50, icpCompanySizeMax: 200, icpIndustries: "",
   };
   contentEl.innerHTML = `
@@ -1621,6 +1621,10 @@ function renderProductForm(cfg, existing) {
     <div class="label">Context — what it is, positioning, differentiators, proof points, messaging rules</div>
     <div class="helpText">This is what the AI reads to score posts and draft comments/DMs. The richer and more specific this is, the better the output — paste in your full product doc, not just a one-liner.</div>
     <textarea id="fContext" class="contextArea">${p.context || ""}</textarea>
+
+    <div class="label">Landing page URL — the specific page for this audience</div>
+    <div class="helpText">If the AI names this product in a comment and points somewhere, it uses exactly this URL — not a guess pulled from the Context text above, and never the bare root domain.</div>
+    <input type="text" id="fLandingUrl" value="${p.landingPageUrl || ""}" placeholder="e.g. https://appbuild.diy/vibes" />
 
     <div class="label">Broad keywords — comma separated (topic awareness search)</div>
     <input type="text" id="fBroadKw" value="${p.broadKeywords || ""}" placeholder="A/B testing, A/B test" />
@@ -1661,6 +1665,7 @@ function renderProductForm(cfg, existing) {
       key,
       name,
       context: document.getElementById("fContext").value.trim(),
+      landingPageUrl: document.getElementById("fLandingUrl").value.trim(),
       broadKeywords: document.getElementById("fBroadKw").value.trim(),
       highIntentKeywords: document.getElementById("fHighKw").value.trim(),
       icpTitles: document.getElementById("fIcpTitles").value.trim(),
