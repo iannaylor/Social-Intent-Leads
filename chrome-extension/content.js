@@ -593,14 +593,18 @@ function _report() {
 // feed full of posts. A visual nudge while casually browsing, not a
 // replacement for the scored/drafted pipeline.
 let overlayEnabled = false;
-let cachedProductKeywords = null; // [{name, keywords: [...], highIntentKeywords: [...]}]
+let cachedProductKeywords = null; // [{name, key, keywords: [...], highIntentKeywords: [...]}]
+let _overlayBackendUrl = null;
+let _overlayApiKey = null;
 const _overlayMarked = new WeakSet();
 
 function _loadOverlaySettings() {
   chrome.storage.local.get(["liveOverlayEnabled", "backendUrl", "backendApiKey"], (r) => {
     overlayEnabled = !!r.liveOverlayEnabled;
-    if (overlayEnabled && r.backendUrl && r.backendApiKey && !cachedProductKeywords) {
-      _fetchProductKeywords(r.backendUrl.replace(/\/+$/, ""), r.backendApiKey);
+    _overlayBackendUrl = r.backendUrl ? r.backendUrl.replace(/\/+$/, "") : null;
+    _overlayApiKey = r.backendApiKey || null;
+    if (overlayEnabled && _overlayBackendUrl && _overlayApiKey && !cachedProductKeywords) {
+      _fetchProductKeywords(_overlayBackendUrl, _overlayApiKey);
     }
   });
 }
@@ -619,12 +623,25 @@ function _fetchProductKeywords(backendUrl, apiKey) {
       const split = (s) => (s || "").split(",").map((k) => k.trim()).filter(Boolean);
       cachedProductKeywords = (data.products || []).map((p) => ({
         name: p.name || p.key,
+        key: p.key,
         highIntentKeywords: split(p.highIntentKeywords),
         keywords: [...split(p.broadKeywords), ...split(p.highIntentKeywords)],
       }));
       log(`overlay: cached keywords for ${cachedProductKeywords.length} product(s)`);
     })
     .catch((e) => log("overlay: failed to load product keywords:", e));
+}
+
+// Best-effort — the post author's name/profile link isn't scraped
+// anywhere else in this file (every existing technique targets a
+// COMMENT's author, not the enclosing POST's), so this is new. Same
+// structural anchor as everywhere else (LinkedIn always links a visible
+// name to /in/...), scoped to the post card and taking the first
+// non-empty-text match, since the author block always renders before any
+// inline comments the card might also contain.
+function _findPostAuthor(card) {
+  const link = Array.from(card.querySelectorAll('a[href*="/in/"]')).find((a) => _cleanText(a).length > 0);
+  return link ? { name: _cleanText(link), profileUrl: link.href } : { name: null, profileUrl: null };
 }
 
 function _scanFeedForIntentMatches() {
@@ -657,31 +674,83 @@ function _scanFeedForIntentMatches() {
       const strongHit = product.highIntentKeywords.find((kw) => haystack.includes(kw.toLowerCase()));
       const hit = strongHit || product.keywords.find((kw) => haystack.includes(kw.toLowerCase()));
       if (hit) {
-        bestMatch = { product: product.name, keyword: hit, strong: !!strongHit };
+        bestMatch = { product: product.name, productKey: product.key, keyword: hit, strong: !!strongHit };
         if (strongHit) break;
       }
     }
 
     if (bestMatch) {
       _overlayMarked.add(card);
-      _injectOverlayBadge(card, bestMatch);
+      const author = _findPostAuthor(card);
+      _injectOverlayBadge(card, bestMatch, { postUrl: link.href, postText: cardText, ...author });
     }
   });
 }
 
-function _injectOverlayBadge(card, match) {
+// Live feedback (2026-07-21): the badge used to be a pure visual flag
+// (pointer-events: none) with no follow-on action — a match with nowhere
+// to go. Now clickable: drafts a comment via the same backend logic the
+// scored pipeline uses, copies it to the clipboard so it can be pasted
+// straight into LinkedIn's own comment box, and creates a real Airtable
+// record so the post shows up in the Queue and gets picked up by the
+// existing reply-detection machinery once the comment is actually posted.
+function _injectOverlayBadge(card, match, post) {
   if (getComputedStyle(card).position === "static") card.style.position = "relative";
   const color = match.strong ? "#d32f2f" : "#0a66c2";
+  const wrap = document.createElement("div");
+  wrap.style.cssText = `position: absolute; top: 4px; right: 4px; z-index: 9999; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;`;
   const badge = document.createElement("div");
   badge.textContent = `🎯 ${match.product} — "${match.keyword}"`;
   badge.title = "Social Intent Comment Queue — client-side keyword match, not a full AI score";
   badge.style.cssText = `
-    position: absolute; top: 4px; right: 4px; z-index: 9999;
     background: ${color}; color: white; font-size: 11px; padding: 3px 8px;
     border-radius: 10px; font-family: -apple-system, sans-serif;
-    pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   `;
-  card.appendChild(badge);
+  const btn = document.createElement("button");
+  btn.textContent = "✍️ Generate Comment";
+  btn.style.cssText = `
+    background: white; color: ${color}; border: 1px solid ${color}; font-size: 11px;
+    font-weight: 600; padding: 3px 8px; border-radius: 10px; cursor: pointer;
+    font-family: -apple-system, sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  `;
+  btn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!_overlayBackendUrl || !_overlayApiKey) {
+      btn.textContent = "Configure backend in Settings first";
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Drafting…";
+    fetch(`${_overlayBackendUrl}/overlay/quick-add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${_overlayApiKey}` },
+      body: JSON.stringify({
+        postUrl: post.postUrl,
+        postText: post.postText,
+        productKey: match.productKey,
+        authorName: post.name,
+        authorProfileUrl: post.profileUrl,
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : r.json().then((e2) => Promise.reject(e2.detail || r.status))))
+      .then((res) => {
+        const comment = res.comment || "";
+        navigator.clipboard.writeText(comment).catch(() => {});
+        btn.textContent = "✓ Copied — paste below";
+        btn.style.cursor = "default";
+        log("overlay: comment drafted and copied", comment);
+      })
+      .catch((e) => {
+        log("overlay: quick-add failed", e);
+        btn.disabled = false;
+        btn.textContent = "Failed — tap to retry";
+      });
+  };
+  wrap.appendChild(badge);
+  wrap.appendChild(btn);
+  card.appendChild(wrap);
   card.style.outline = `2px solid ${color}`;
   card.style.outlineOffset = "2px";
 }

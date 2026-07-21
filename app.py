@@ -299,6 +299,66 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
     return {"comment": draft.get("comment")}
 
 
+@app.post("/overlay/quick-add")
+async def overlay_quick_add(body: dict, authorization: str = Header(default="")):
+    """The live-browsing overlay (content.js, opt-in) flags posts matching a
+    product's keywords while the user is just scrolling their feed —
+    outside the normal search/scan pipeline entirely, no Airtable record
+    exists for them yet. This is the "Generate Comment" action on that
+    badge: the click itself IS the relevance signal (a human already
+    looked at it), so this skips score_post() and drafts directly, then
+    creates a real record so the post (a) shows up in the normal Queue,
+    and (b) gets picked up by the existing reply-detection machinery once
+    the comment is actually posted and someone replies to it."""
+    api_key = require_auth(authorization)
+    post_url = body.get("postUrl")
+    post_text = body.get("postText")
+    if not post_url or not post_text:
+        raise HTTPException(status_code=400, detail="postUrl and postText are required")
+
+    product_key = body.get("productKey")
+    if product_key:
+        try:
+            product_config = await products_store.get_product_config(product_key)
+        except KeyError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    else:
+        # No key sent — fall back to best-effort keyword inference, same
+        # pattern /queue/draft-reply already uses for scraped-page content
+        # with no Airtable match to look up a product from.
+        product_config = await products_store.infer_product_from_text(post_text)
+    if not product_config:
+        raise HTTPException(status_code=422, detail="Could not resolve a product for this post")
+
+    voice_profile = await voice_store.get_voice_profile(api_key)
+    # Manually assigned, not run through score_post() — the overlay only
+    # ever badges a keyword hit a human then chose to act on, which is a
+    # stronger signal than an unreviewed AI score. 4 sits at the "product
+    # mention allowed" threshold draft_content's own prompt rule checks
+    # (claude_client.py), same as a real score_post() 4/5 would.
+    score = 4
+    try:
+        draft = await claude_client.draft_content(
+            product_config, post_text, score, False, "comment", None, voice_profile,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Comment drafting failed: {e}")
+
+    item = {
+        "postUrl": post_url,
+        "name": body.get("authorName"),
+        "profileUrl": body.get("authorProfileUrl"),
+        "product": product_key or product_config["name"],
+        "commentary": post_text,
+        "score": score,
+        "action": "comment",
+        "comment": draft.get("comment"),
+        "sourceLabel": "live-overlay",
+    }
+    await airtable_store.upsert_items([item], None)
+    return {"comment": draft.get("comment")}
+
+
 @app.post("/queue/draft-reply")
 async def draft_reply(body: dict, authorization: str = Header(default="")):
     """Someone replied to a comment already left on their post — the
