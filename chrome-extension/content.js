@@ -528,11 +528,7 @@ function _scanNotifications() {
 //
 // NEEDS LIVE VERIFICATION — LinkedIn's messaging UI has not been
 // exercised anywhere else in this file (unlike the feed/notifications
-// selectors, which were iterated on live repeatedly). This is a first
-// attempt using the same "a name is linked to /in/..." structural anchor
-// proven elsewhere, plus a best-effort guess at "the latest substantial
-// text block on the page" for the message body — logs heavily so a live
-// test can pinpoint exactly what's wrong if the guess is off.
+// selectors, which were iterated on live repeatedly).
 let _lastReportedDmSignature = null;
 
 function _scanMessagingThread() {
@@ -541,9 +537,16 @@ function _scanMessagingThread() {
     return;
   }
 
+  // Live bug (2026-07-21): grabbed a /in/ link whose text was the other
+  // party's name AND headline concatenated together ("Victoria Olamide
+  // Turning product positioning into users..."), same class of bug seen
+  // earlier with comment-author links bundling a headline into the same
+  // element. A real name is short; capping the accepted length rejects a
+  // combined name+headline link instead of taking it as-is (and sending
+  // a corrupted name to the backend lookup, guaranteed to match nothing).
   const otherLink = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((a) => {
     const t = _cleanText(a);
-    return t && !_isOwnName(t);
+    return t && t.length <= 50 && !_isOwnName(t);
   });
   if (!otherLink) {
     log("messaging: no distinct /in/ profile link found on this thread — can't identify the other party");
@@ -551,26 +554,41 @@ function _scanMessagingThread() {
   }
   const otherName = _cleanText(otherLink);
 
-  // Best-effort "latest message" guess: the last reasonably-sized leaf
-  // text block on the page. Deliberately not scoped to a specific
-  // message-list container (untested/unknown class names) — logs the
-  // full candidate count so a live test shows whether this needs
-  // narrowing.
-  const candidates = Array.from(document.querySelectorAll("p, span, div")).filter((el) => {
+  // Live bug (2026-07-21): "grab the last substantial text block on the
+  // page" caught UI chrome ("Clicking Send will send message", an
+  // accessibility/tooltip string near the Send button), not an actual
+  // message. LinkedIn repeats the sender's name as a small heading
+  // directly above each of their messages (visible live: "Victoria
+  // Olamide · 4:13 PM" sitting right above her message text) — the same
+  // "name repeated as a heading before the content" structure already
+  // proven for comment threads elsewhere in this file
+  // (_findRepliesUnderOwnComment). Find every such header for the OTHER
+  // party specifically, take the LAST one (most recent message), and
+  // read the text that follows it via the same _boundedContainer climb
+  // _findOwnCommentText already uses for an analogous "name heading,
+  // then body text" shape.
+  const headers = Array.from(document.querySelectorAll("span, div, a")).filter((el) => {
     if (el.children.length > 0) return false;
     const t = _cleanText(el);
-    return t.length > 15 && t.length < 2000;
+    return t === otherName || t.startsWith(otherName + " ");
   });
-  if (!candidates.length) {
-    log(`messaging: found thread with "${otherName}" but no message text candidates`);
+  if (!headers.length) {
+    log(`messaging: found other party "${otherName}" but no repeated name-header found to anchor their latest message`);
     return;
   }
-  const messageText = _cleanText(candidates[candidates.length - 1]);
+  const lastHeader = headers[headers.length - 1];
+  const bodyContainer = _boundedContainer(lastHeader, otherName.length + 10, 2000, 6);
+  const messageText = _cleanText(bodyContainer).replace(new RegExp(`^${otherName}\\s*`), "").trim();
+  if (!messageText) {
+    log(`messaging: found a name-header for "${otherName}" but no message text after it`);
+    return;
+  }
+
   const signature = `${otherName}|${messageText}`;
   if (signature === _lastReportedDmSignature) return;
   _lastReportedDmSignature = signature;
 
-  log(`messaging: detected thread with "${otherName}" (${candidates.length} text candidate(s)), latest: "${messageText.slice(0, 150)}"`);
+  log(`messaging: detected thread with "${otherName}" (${headers.length} name-header(s) found), latest: "${messageText.slice(0, 150)}"`);
   _safeSendMessage({ type: "SOCIAL_INTENT_DM_DETECTED", otherName, messageText });
 }
 
