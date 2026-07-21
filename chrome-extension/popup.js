@@ -2015,25 +2015,39 @@ if (chrome.runtime && chrome.runtime.onMessage) {
 // content on an unrelated event.
 let currentDmSignature = null;
 
+// Reuses the same handledReplies storage the comment-reply banner already
+// writes to (markReplyHandled/getHandledReplies, defined near that
+// banner's code) — a "dm|" prefix keeps DM signatures from ever colliding
+// with a comment-reply signature in the same set.
+function _dmHandledKey(otherName, messageText) {
+  return `dm|${otherName}|${messageText}`;
+}
+
 function processDmMessage(msg) {
   const signature = `${msg.otherName}|${msg.messageText}`;
   if (signature === currentDmSignature) return; // already showing this one
   console.log("[social-intent] popup received DM message:", msg);
-  currentDmSignature = signature;
-  getBackendConfig((cfg) => {
-    if (!cfg.configured) {
-      renderDmBanner(msg.otherName, msg.messageText, null, "Cloud mode only — configure a backend in Settings.");
+  getHandledReplies((handled) => {
+    if (handled.has(_dmHandledKey(msg.otherName, msg.messageText))) {
+      console.log("[social-intent] this DM was already marked Done — not re-showing");
       return;
     }
-    fetch(`${cfg.url}/queue/lookup-by-name?name=${encodeURIComponent(msg.otherName)}`, {
-      headers: { Authorization: `Bearer ${cfg.apiKey}` },
-    })
-      .then((r) => {
-        if (r.status === 404) return null;
-        return r.ok ? r.json() : Promise.reject(r.status);
+    currentDmSignature = signature;
+    getBackendConfig((cfg) => {
+      if (!cfg.configured) {
+        renderDmBanner(msg.otherName, msg.messageText, null, "Cloud mode only — configure a backend in Settings.");
+        return;
+      }
+      fetch(`${cfg.url}/queue/lookup-by-name?name=${encodeURIComponent(msg.otherName)}`, {
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
       })
-      .then((found) => renderDmBanner(msg.otherName, msg.messageText, found, null))
-      .catch((e) => renderDmBanner(msg.otherName, msg.messageText, null, `Lookup failed: ${e}`));
+        .then((r) => {
+          if (r.status === 404) return null;
+          return r.ok ? r.json() : Promise.reject(r.status);
+        })
+        .then((found) => renderDmBanner(msg.otherName, msg.messageText, found, null))
+        .catch((e) => renderDmBanner(msg.otherName, msg.messageText, null, `Lookup failed: ${e}`));
+    });
   });
 }
 
@@ -2046,6 +2060,11 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
     currentDmSignature = null;
   };
 
+  const markHandledAndClose = () => {
+    markReplyHandled(_dmHandledKey(otherName, messageText));
+    closeBanner();
+  };
+
   if (errorMsg || !found) {
     banner.innerHTML = `
       <div class="replyBannerHeader">Message from ${otherName}</div>
@@ -2055,7 +2074,7 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
       }</div>
       <div class="row"><button id="dismissDmBtn">Dismiss</button></div>
     `;
-    document.getElementById("dismissDmBtn").onclick = closeBanner;
+    document.getElementById("dismissDmBtn").onclick = markHandledAndClose;
     return;
   }
 
@@ -2069,7 +2088,7 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
       <button id="dismissDmBtn">Dismiss</button>
     </div>
   `;
-  document.getElementById("dismissDmBtn").onclick = closeBanner;
+  document.getElementById("dismissDmBtn").onclick = markHandledAndClose;
   document.getElementById("dmOpenPostBtn").onclick = () => openInWorkingTab(found.postUrl);
   document.getElementById("draftDmBtn").onclick = () => {
     const btn = document.getElementById("draftDmBtn");
@@ -2092,7 +2111,10 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
           const draft = res.replyText || "";
           draftArea.innerHTML = `
             <textarea id="dmDraftBox">${draft}</textarea>
-            <div class="row"><button id="copyDmDraftBtn" class="primary">Copy Reply</button></div>
+            <div class="row">
+              <button id="copyDmDraftBtn" class="primary">Copy Reply</button>
+              <button id="doneDmBtn">Done</button>
+            </div>
             <div id="dmCopiedMsg" style="font-size:11px;color:#0a7d2c;min-height:14px;margin-top:4px;"></div>
           `;
           navigator.clipboard.writeText(draft).then(() => {
@@ -2102,6 +2124,11 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
             navigator.clipboard.writeText(document.getElementById("dmDraftBox").value);
             document.getElementById("dmCopiedMsg").textContent = "Copied — paste it into the message box.";
           };
+          // Separate from Copy on purpose, same reasoning as the
+          // comment-reply banner — copying is easy to do more than once
+          // while tweaking the text first; Done is the explicit "I've
+          // sent it" signal that actually closes this out for good.
+          document.getElementById("doneDmBtn").onclick = markHandledAndClose;
           btn.disabled = false;
         })
         .catch((e) => {
