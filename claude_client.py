@@ -297,11 +297,23 @@ Rules — same bar as any comment:
   5 apps live" answers "have you submitted to the App Store yet"), do not keep
   probing that same confirmed point. Briefly acknowledge what they said, in one
   clause, then pivot the actual question to a DIFFERENT pain point from the
-  positioning that hasn't been confirmed either way yet. If EVERY distinct pain
-  point this product addresses has now been confirmed as already handled, don't
-  invent a new angle just to keep the thread going — a short genuine reaction with
-  no new question is the honest move, and better than looking like you didn't
-  register what they told you.
+  positioning that hasn't been confirmed either way yet.
+- When more than one unconfirmed pain point is available to pivot to, don't just
+  pick any of them — rank by which is a genuine CAPABILITY GAP versus a mere
+  WORKFLOW-FRICTION point, and prefer the capability gap. A capability gap is
+  something the underlying tool/platform they're already using structurally cannot
+  do on its own (e.g. native push notifications on a WebView-wrapped app) — they
+  likely haven't even clocked it as a missing piece, so asking about it creates a
+  real "wait, I don't have that" moment. A workflow-friction point is just a minor
+  inconvenience within something they can already do (e.g. whether re-publishing an
+  app they've already got live is mildly annoying) — easy to shrug off with "it's
+  fine," and a much weaker opener. If the confirmed part of their reply already
+  covers the friction point too (e.g. having apps live at all implies publishing
+  works), that's an extra reason to skip it and go straight for the capability gap.
+  If EVERY distinct pain point this product addresses has now been confirmed as
+  already handled, don't invent a new angle just to keep the thread going — a short
+  genuine reaction with no new question is the honest move, and better than looking
+  like you didn't register what they told you.
 {product_mention_rule}
 Original post: {post_text}
 
