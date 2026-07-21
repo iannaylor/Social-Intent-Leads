@@ -675,7 +675,7 @@ function renderFromQueue() {
         progressEl.textContent = `${doneActionable} / ${actionable.length} done — ${remaining.length} left in queue`;
         contentEl.innerHTML = `
           <div id="doneScreen">
-            <div style="margin-bottom:12px;">${remaining.length} item${remaining.length === 1 ? "" : "s"} ready to review, starting with <strong>${item.name}</strong>.</div>
+            <div style="margin-bottom:12px;">${remaining.length} item${remaining.length === 1 ? "" : "s"} ready to review, starting with <strong>${item.name || "Unknown"}</strong>.</div>
             <button id="startQueueBtn" class="primary">Start reviewing →</button>
             <div class="helpText" style="margin-top:8px;">Opens LinkedIn to the first post and copies its comment — nothing happens until you click this.</div>
           </div>
@@ -710,7 +710,7 @@ function renderFromQueue() {
       const scoreClass = `score-${item.score}`;
       let html = `
         <div>
-          <span id="name">${item.name}</span>
+          <span id="name">${item.name || "Unknown"}</span>
           <span id="scoreBadge" class="${scoreClass}">${item.score}/5 — ${SCORE_LABELS[item.score] || ""}</span>
           ${item.isInfluencer ? '<span id="influencerBadge">Influencer</span>' : ""}
         </div>
@@ -983,7 +983,7 @@ function renderFollowupsView() {
         const card = document.createElement("div");
         card.className = "profileCard";
         card.innerHTML = `
-          <div class="pname">${item.name} ${item.isInfluencer ? '<span id="influencerBadge">Influencer</span>' : ""}</div>
+          <div class="pname">${item.name || "Unknown"} ${item.isInfluencer ? '<span id="influencerBadge">Influencer</span>' : ""}</div>
           <div class="psummary">${item.sourceLabel || "Source unrecorded"} — <a href="#" class="postLink">view original post</a></div>
           <div class="label">Connection note sent</div>
           <textarea class="small connNoteRef" readonly>${item.connectionNote || ""}</textarea>

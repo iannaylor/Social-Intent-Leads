@@ -738,9 +738,21 @@ function _fetchProductKeywords(backendUrl, apiKey) {
 // name to /in/...), scoped to the post card and taking the first
 // non-empty-text match, since the author block always renders before any
 // inline comments the card might also contain.
+//
+// Live bug (2026-07-21): a post authored by a Company Page (e.g. "Keystone
+// Product") has no /in/ link at all for its author — only a /company/
+// link — so this returned {name: null}, which Airtable then stored as a
+// genuinely empty field, which the Queue UI rendered as the literal text
+// "undefined" (a bare ${item.name} template interpolation of JS
+// undefined). Falling back to the post's /company/ link picks up the
+// organization's name as the "author" for company-page posts instead of
+// silently returning nothing.
 function _findPostAuthor(card) {
-  const link = Array.from(card.querySelectorAll('a[href*="/in/"]')).find((a) => _cleanText(a).length > 0);
-  return link ? { name: _cleanText(link), profileUrl: link.href } : { name: null, profileUrl: null };
+  const personLink = Array.from(card.querySelectorAll('a[href*="/in/"]')).find((a) => _cleanText(a).length > 0);
+  if (personLink) return { name: _cleanText(personLink), profileUrl: personLink.href };
+  const companyLink = Array.from(card.querySelectorAll('a[href*="/company/"]')).find((a) => _cleanText(a).length > 0);
+  if (companyLink) return { name: _cleanText(companyLink), profileUrl: companyLink.href };
+  return { name: null, profileUrl: null };
 }
 
 function _scanFeedForIntentMatches() {
