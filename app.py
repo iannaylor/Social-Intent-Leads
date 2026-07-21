@@ -325,6 +325,63 @@ async def retry_enrichment(body: dict, authorization: str = Header(default="")):
     return result
 
 
+@app.post("/queue/bulk-regenerate")
+async def bulk_regenerate(body: dict, authorization: str = Header(default="")):
+    """Recovers every item skipped specifically because comment drafting
+    failed (a Claude API error — timeout, transient failure, or credit
+    exhaustion), not a genuine ICP/topic mismatch. Live incident
+    (2026-07-21): a whole batch (14 candidates, all sharing one Run ID)
+    hit total Claude drafting failure during a credit-exhaustion window;
+    each one silently kept its qualified action with an empty comment
+    instead of being flagged, and once flagged, recovering them one by
+    one via /queue/generate-comment would have meant 14 separate manual
+    clicks. This finds every item matching that failure signature
+    (optionally scoped to one product) and re-drafts all of them in one
+    call."""
+    api_key = require_auth(authorization)
+    product = body.get("product")
+    items = await airtable_store.get_failed_drafts(product)
+    if not items:
+        return {"processed": 0, "succeeded": 0, "failed": 0}
+
+    voice_profile = await voice_store.get_voice_profile(api_key)
+    succeeded = 0
+    failed = 0
+    for item in items:
+        try:
+            product_config = await products_store.get_product_config(item["product"])
+            action = "comment+connect" if item.get("connectReason") else "comment"
+            draft = await claude_client.draft_content(
+                product_config,
+                item.get("commentary") or "",
+                item.get("score", 0),
+                item.get("isInfluencer", False),
+                action,
+                item.get("connectReason"),
+                voice_profile,
+            )
+        except Exception as e:
+            failed += 1
+            await airtable_store.update_items(
+                [{"recordId": item["recordId"], "skipReason": f"Comment drafting failed again on retry: {e}"}]
+            )
+            continue
+        succeeded += 1
+        await airtable_store.update_items(
+            [
+                {
+                    "recordId": item["recordId"],
+                    "action": action,
+                    "skipReason": "",
+                    "comment": draft.get("comment"),
+                    "connectionNote": draft.get("connectionNote"),
+                    "dmMessage": draft.get("dmMessage"),
+                }
+            ]
+        )
+    return {"processed": len(items), "succeeded": succeeded, "failed": failed}
+
+
 @app.post("/overlay/quick-add")
 async def overlay_quick_add(body: dict, authorization: str = Header(default="")):
     """The live-browsing overlay (content.js, opt-in) flags posts matching a

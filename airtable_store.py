@@ -329,6 +329,40 @@ async def get_queue(
     return [i for i in items if i.get("action") not in ("pending_batch", "enriched_pending_draft")]
 
 
+async def get_failed_drafts(
+    product: Optional[str] = None, base_id: Optional[str] = None, api_key: Optional[str] = None
+) -> list[dict]:
+    """Items skipped specifically because comment drafting failed (a
+    Claude API error, e.g. credit exhaustion) — not a genuine ICP/topic
+    mismatch. Live incident (2026-07-21): a whole batch hit this during a
+    Claude credit outage; every draft_content() call failed, and every
+    one of them needed regenerating once credits were topped up.
+    Distinguished from every other skip reason by the "Comment drafting"
+    substring both v1.6.0's automatic path and this incident's manual
+    cleanup consistently use — feeds POST /queue/bulk-regenerate so
+    recovering from an outage like this is one call, not one per record."""
+    filter_parts = [f"FIND('Comment drafting', {{{FIELD_NAMES['skipReason']}}})"]
+    if product:
+        filter_parts.append(f"{{{FIELD_NAMES['product']}}} = '{product}'")
+    filter_formula = "AND(" + ", ".join(filter_parts) + ")"
+
+    records = []
+    offset = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            params = {"pageSize": "100", "filterByFormula": filter_formula}
+            if offset:
+                params["offset"] = offset
+            resp = await client.get(_url(base_id), headers=_headers(api_key), params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            records.extend(data.get("records", []))
+            offset = data.get("offset")
+            if not offset:
+                break
+    return [_record_to_item(r) for r in records]
+
+
 async def set_item_status(
     post_url: str, status: str, base_id: Optional[str] = None, api_key: Optional[str] = None
 ) -> bool:

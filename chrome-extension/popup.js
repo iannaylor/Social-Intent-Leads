@@ -191,6 +191,13 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
     <div class="helpText">Off (default): each skip shows its reason and the post, so you can review and override before moving on.</div>
 
     ${cfg.configured ? `
+      <div class="label" style="margin-top:16px;">Recover failed drafts</div>
+      <div class="helpText">If a Claude API outage (e.g. running out of credits mid-batch) caused a batch of comments to fail drafting, they're skipped with a "Comment drafting failed" reason rather than left silently blank. Use this to re-draft all of them in one go once the underlying issue is fixed, instead of one at a time.</div>
+      <div class="row"><button id="bulkRegenerateBtn">${ICONS.zap} Regenerate All Failed Drafts</button></div>
+      <div id="bulkRegenerateMsg" style="font-size:12px;margin:6px 0 16px;min-height:16px;"></div>
+    ` : ""}
+
+    ${cfg.configured ? `
       <div class="label" style="margin-top:16px;">Your voice</div>
       <div class="helpText">Applies to every comment you draft, across every product — this is about how YOU sound, not any one product. Point it at your own LinkedIn profile to infer a starting brief from your real posts, then edit it into something you're happy with.</div>
 
@@ -259,6 +266,35 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
 
   document.getElementById("fLiveOverlay").onchange = (e) => {
     chrome.storage.local.set({ liveOverlayEnabled: e.target.checked });
+  };
+
+  document.getElementById("bulkRegenerateBtn").onclick = () => {
+    const btn = document.getElementById("bulkRegenerateBtn");
+    const msg = document.getElementById("bulkRegenerateMsg");
+    btn.disabled = true;
+    msg.textContent = "Re-drafting failed comments…";
+    msg.style.color = "#555";
+    fetch(`${cfg.url}/queue/bulk-regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+      .then((res) => {
+        if (!res.processed) {
+          msg.textContent = "No failed drafts found — nothing to do.";
+          msg.style.color = "#0a7d2c";
+        } else {
+          msg.textContent = `Done: ${res.succeeded}/${res.processed} re-drafted successfully${res.failed ? `, ${res.failed} failed again` : ""}.`;
+          msg.style.color = res.failed ? "#a15c00" : "#0a7d2c";
+        }
+        btn.disabled = false;
+      })
+      .catch((e) => {
+        msg.textContent = `Failed: ${e.message || e}`;
+        msg.style.color = "#b8003c";
+        btn.disabled = false;
+      });
   };
 
   document.getElementById("generateVoiceBtn").onclick = () => {
