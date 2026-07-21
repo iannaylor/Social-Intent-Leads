@@ -537,22 +537,30 @@ function _scanMessagingThread() {
     return;
   }
 
-  // Live bug (2026-07-21): grabbed a /in/ link whose text was the other
-  // party's name AND headline concatenated together ("Victoria Olamide
-  // Turning product positioning into users..."), same class of bug seen
-  // earlier with comment-author links bundling a headline into the same
-  // element. A real name is short; capping the accepted length rejects a
-  // combined name+headline link instead of taking it as-is (and sending
-  // a corrupted name to the backend lookup, guaranteed to match nothing).
-  const otherLink = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((a) => {
+  // Live bug (2026-07-21), two rounds: taking whichever /in/ link came
+  // FIRST in DOM order was never reliable — round 1 grabbed a link whose
+  // text was name+headline concatenated together, round 2 (after capping
+  // length) grabbed a hidden presence-status label ("Status is offline",
+  // near the avatar) that happened to also sit in a short /in/ link ahead
+  // of the real name. Live feedback: the other party's actual name is the
+  // one thing repeated multiple times on this page (thread list preview,
+  // conversation header, each message's own sender line) — frequency is a
+  // far more reliable signal than "whichever link comes first". Count
+  // every short /in/-linked text's occurrences and take the most frequent
+  // one that isn't us, rather than trusting position at all.
+  const nameCounts = new Map();
+  Array.from(document.querySelectorAll('a[href*="/in/"]')).forEach((a) => {
     const t = _cleanText(a);
-    return t && t.length <= 50 && !_isOwnName(t);
+    if (!t || t.length > 50 || _isOwnName(t)) return;
+    nameCounts.set(t, (nameCounts.get(t) || 0) + 1);
   });
-  if (!otherLink) {
+  if (!nameCounts.size) {
     log("messaging: no distinct /in/ profile link found on this thread — can't identify the other party");
     return;
   }
-  const otherName = _cleanText(otherLink);
+  const ranked = [...nameCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const otherName = ranked[0][0];
+  log(`messaging: name candidates — ${ranked.map(([n, c]) => `"${n}"×${c}`).join(", ")} — picked "${otherName}"`);
 
   // Live bug (2026-07-21): "grab the last substantial text block on the
   // page" caught UI chrome ("Clicking Send will send message", an
