@@ -25,6 +25,12 @@ def _get_client() -> AsyncAnthropic:
 SCORE_TOOL = {
     "name": "submit_score",
     "description": "Submit the buying-intent score and influencer flag for this post.",
+    # Marks the end of the cacheable "tools" prefix block (see the system
+    # param in score_post below for the bigger cache win — this one is
+    # small enough on its own that it may fall under the 1024-token
+    # minimum to actually cache, but it's free to mark and helps once/if
+    # the schema grows.
+    "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
         "properties": {
@@ -56,6 +62,7 @@ SCORE_TOOL = {
 REPLY_TOOL = {
     "name": "submit_reply",
     "description": "Submit a drafted reply continuing an existing comment thread.",
+    "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
         "properties": {"replyText": {"type": "string"}},
@@ -66,6 +73,7 @@ REPLY_TOOL = {
 DRAFT_TOOL = {
     "name": "submit_draft",
     "description": "Submit the drafted comment and, if applicable, connection note and DM.",
+    "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
         "properties": {
@@ -224,10 +232,16 @@ async def score_post(product_config: dict, post_text: str) -> dict:
         product_name=product_config["name"],
         product_positioning=product_config["positioning"],
     )
+    # This system prompt is byte-identical across every candidate scored
+    # for the same product within a scan (pipeline.py's _gather_limited
+    # runs up to 50 per profile, 5 at a time) — only the post text in the
+    # user message differs call to call. Marking it cacheable turns calls
+    # 2-50 of every scan into cache reads (90% cheaper, faster) instead of
+    # reprocessing the full product positioning from scratch each time.
     resp = await client.messages.create(
         model=MODEL,
         max_tokens=1024,
-        system=system,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         tools=[SCORE_TOOL],
         tool_choice={"type": "tool", "name": "submit_score"},
         messages=[{"role": "user", "content": f"Post:\n\n{post_text}"}],
@@ -272,10 +286,14 @@ async def draft_content(
         f"Score: {score}\nisInfluencer: {is_influencer}\naction: {action}\n"
         f"connectReason: {connect_reason}"
     )
+    # Same cacheable-prefix reasoning as score_post above — this system
+    # prompt (product positioning + voice addendum, when present) is
+    # identical across every draft_content call for the same product/
+    # customer within a batch.
     resp = await client.messages.create(
         model=MODEL,
         max_tokens=1024,
-        system=system,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         tools=[DRAFT_TOOL],
         tool_choice={"type": "tool", "name": "submit_draft"},
         messages=[{"role": "user", "content": context}],
@@ -333,13 +351,22 @@ Rules — same bar as any comment:
   genuine reaction with no new question is the honest move, and better than looking
   like you didn't register what they told you.
 {product_mention_rule}
+
+The original post, your prior comment, and their reply are given in the user
+message below. Call submit_reply with your draft."""
+
+# Kept out of the system prompt on purpose (post_text/own_comment/reply_text
+# differ on every single call, unlike everything above) — baking them into
+# system would make the system prompt unique per call and defeat caching
+# entirely, even though product_section/product_mention_rule above are
+# identical across every reply drafted for the same product.
+REPLY_USER_MESSAGE = """Score: {score}
+
 Original post: {post_text}
 
 Your prior comment: {own_comment}
 
-Their reply: {reply_text}
-
-Call submit_reply with your draft."""
+Their reply: {reply_text}"""
 
 # Filled in when a product could be identified (an Airtable match, or a
 # decent keyword-inference score against scraped page text).
@@ -382,9 +409,6 @@ async def draft_reply(
     system = REPLY_SYSTEM_PROMPT.format(
         product_section=product_section,
         product_mention_rule=product_mention_rule,
-        post_text=post_text,
-        own_comment=own_comment,
-        reply_text=reply_text,
     )
     if voice_profile and voice_profile.get("voiceBrief"):
         system += VOICE_ADDENDUM.format(
@@ -392,13 +416,16 @@ async def draft_reply(
             length_line=LENGTH_LINES.get(voice_profile.get("replyLength"), ""),
             style_line=STYLE_LINES.get(voice_profile.get("replyStyle"), ""),
         )
+    user_message = REPLY_USER_MESSAGE.format(
+        score=score, post_text=post_text, own_comment=own_comment, reply_text=reply_text
+    )
     resp = await client.messages.create(
         model=MODEL,
         max_tokens=1024,
-        system=system,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         tools=[REPLY_TOOL],
         tool_choice={"type": "tool", "name": "submit_reply"},
-        messages=[{"role": "user", "content": f"Score: {score}"}],
+        messages=[{"role": "user", "content": user_message}],
     )
     return _extract_tool_input(resp, "submit_reply")
 
