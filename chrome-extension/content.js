@@ -75,6 +75,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
+// Kept in sync BY HAND with the identically-named function in popup.js —
+// the two run in separate script contexts (content script vs. side panel)
+// with no shared module, so this list of patterns is duplicated there.
+// Live bug (2026-07-23): popup.js's copy drifted out of sync with two
+// patterns added here, which silently broke _removeMatchingNotificationLead
+// there (a notification lead could never be matched to its activity ID,
+// so it never left the Follow-ups list no matter how many times it was
+// dismissed or marked done). If this list changes again, update popup.js's
+// copy too.
 function _extractActivityId(url) {
   const patterns = [
     /activity[:-](\d+)/, // /posts/user_slug-activity-1234567890-abcd

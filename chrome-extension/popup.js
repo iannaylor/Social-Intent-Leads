@@ -1882,9 +1882,25 @@ function renderProductForm(cfg, existing) {
 // person still reads the AI's suggestion, edits it if needed, and pastes
 // it in themselves.
 
+// Kept in sync BY HAND with the identically-named function in content.js —
+// the two run in separate script contexts (content script vs. side panel)
+// with no shared module, so this list of patterns has to be duplicated.
+// Live bug (2026-07-23): this copy was missing two patterns content.js
+// already had (the "-share-" permalink shape and the percent-encoded
+// "activity" URN), so _removeMatchingNotificationLead below could never
+// resolve a notification lead's URL to an activity ID and silently never
+// removed it from the Follow-ups list, no matter how many times its
+// reply was dismissed or marked done. If content.js's copy ever changes
+// again, this one needs the same change.
 function _extractActivityId(url) {
   if (!url) return null;
-  const patterns = [/activity[:-](\d+)/, /urn:li:ugcPost:(\d+)/, /urn%3Ali%3AugcPost%3A(\d+)/];
+  const patterns = [
+    /activity[:-](\d+)/,
+    /urn:li:ugcPost:(\d+)/,
+    /urn%3Ali%3AugcPost%3A(\d+)/,
+    /-share-(\d+)-/,
+    /urn%3Ali%3Aactivity%3A(\d+)/,
+  ];
   for (const re of patterns) {
     const m = url.match(re);
     if (m) return m[1];
