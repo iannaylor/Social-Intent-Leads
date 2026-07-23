@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Social Intent Comment Queue",
-  "version": "3.0",
+  "version": "1.14.5",
   "description": "Click through a prepared list of intent-signal posts, copy the drafted comment or connection note, and post it yourself. Runs as a side panel so it stays open while you work across tabs.",
   "action": {
     "default_icon": {
