@@ -530,7 +530,18 @@ function _scanNotifications() {
     let name, url;
     if (link) {
       const linkText = _cleanText(link);
-      name = linkText.replace(/\s*(mentioned you in a comment|replied to your comment)\.?.*$/i, "").trim();
+      // Live bug (2026-07-23): an UNREAD notification card has a
+      // screen-reader-only "Unread notification." label baked into the
+      // SAME link, ahead of the visible "PersonName replied to your
+      // comment" text — a READ notification has no such prefix. Left
+      // unstripped, this produced "Unread notification. PersonName" as
+      // the extracted name for every still-unread lead (confirmed live:
+      // roughly half of a 29-item Follow-ups list showed this exact
+      // pattern, the other half — already-read notifications — didn't).
+      name = linkText
+        .replace(/\s*(mentioned you in a comment|replied to your comment)\.?.*$/i, "")
+        .replace(/^unread notification\.?\s*/i, "")
+        .trim();
       url = link.href;
       log(`candidate #${idx}: link text "${linkText.slice(0, 60)}" -> extracted name "${name}"`);
     } else {
