@@ -477,32 +477,53 @@ function _scanNotifications() {
     //
     // A richer notification (a reply that also embeds a preview of the
     // ORIGINAL post being discussed, not just a plain "X liked your
-    // post") can contain a SECOND link matching the same href pattern —
-    // the embedded post preview itself. Matching on href alone picked up
-    // whichever came first in DOM order, which silently grabbed the
-    // wrong one and produced a garbled name instead of the real one
-    // (live-confirmed 2026-07-20: "Marinell Falcón" never showed up,
-    // presumably because the post-preview link won the href match
-    // first). Requiring the candidate link's OWN TEXT to also contain
-    // the matched phrase ties extraction directly to the element that
-    // actually said "mentioned you in a comment" — a post-preview link
-    // never contains that phrase, so it can't win by accident anymore.
-    let link = allLinks.find((a) => {
-      const href = a.getAttribute("href") || "";
-      return /\/feed\/update\/|\/posts\//.test(href) && pattern.test(_cleanText(a));
-    });
-    if (!link) {
-      // Fallback to the old, looser match in case this specific
-      // notification type doesn't actually have the phrase text inside
-      // the link itself — better to try the previous best guess than
-      // drop the candidate entirely.
-      link = allLinks.find((a) => /\/feed\/update\/|\/posts\//.test(a.getAttribute("href") || ""));
+    // post") can contain a SECOND link — the embedded post preview
+    // itself. Matching on href alone picked up whichever came first in
+    // DOM order, which silently grabbed the wrong one and produced a
+    // garbled name instead of the real one (live-confirmed 2026-07-20:
+    // "Marinell Falcón" never showed up, presumably because the
+    // post-preview link won the href match first). Requiring the
+    // candidate link's OWN TEXT to also contain the matched phrase ties
+    // extraction directly to the element that actually said "mentioned
+    // you in a comment" — a post-preview link never contains that
+    // phrase, so it can't win by accident.
+    //
+    // Live bug (2026-07-23): this used to ALSO require the phrase-
+    // bearing link's href to match /feed/update/ or /posts/ specifically
+    // — a third constraint on top of the phrase match, and a brittle one
+    // (this file has already hit two prior "notification link shape
+    // changed" bugs). The phrase-in-text match alone is already the
+    // reliable signal per the reasoning above; requiring a specific href
+    // shape too meant a single LinkedIn markup change could silently
+    // drop every candidate on a page with no error at all — exactly what
+    // happened here (a whole notifications page full of "X replied to
+    // your comment" producing zero results). Dropped that extra
+    // constraint, and added a profile-link fallback below for the case
+    // where the phrase and the name genuinely aren't in the same link.
+    let link = allLinks.find((a) => pattern.test(_cleanText(a)));
+    let name, url;
+    if (link) {
+      const linkText = _cleanText(link);
+      name = linkText.replace(/\s*(mentioned you in a comment|replied to your comment)\.?.*$/i, "").trim();
+      url = link.href;
+      log(`candidate #${idx}: link text "${linkText.slice(0, 60)}" -> extracted name "${name}"`);
+    } else {
+      // Fall back to the person's own profile link so the lead is still
+      // actionable even without a link to the post itself — "Open" will
+      // land on their profile instead of the post, still enough to go
+      // find and reply, rather than the candidate vanishing entirely.
+      const profileLink = allLinks.find((a) => {
+        const t = _cleanText(a);
+        return /\/in\//.test(a.getAttribute("href") || "") && t.length > 0 && t.length < 60;
+      });
+      if (!profileLink) {
+        log(`candidate #${idx}: no phrase-bearing link or fallback profile link found, skipping`);
+        return;
+      }
+      name = _cleanText(profileLink);
+      url = profileLink.href;
+      log(`candidate #${idx}: no phrase-bearing link found, falling back to profile link -> name "${name}"`);
     }
-    if (!link) { log(`candidate #${idx}: no feed/update or posts link found, skipping`); return; }
-    const linkText = _cleanText(link);
-    const name = linkText.replace(/\s*(mentioned you in a comment|replied to your comment)\.?.*$/i, "").trim();
-    const url = link.href;
-    log(`candidate #${idx}: link text "${linkText.slice(0, 60)}" -> extracted name "${name}"`);
     if (!name || !url) return;
 
     const key = name + "|" + url;
