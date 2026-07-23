@@ -85,6 +85,16 @@ function _extractActivityId(url) {
     // — matched none of the above, so content.js silently gave up on the
     // whole page (no reply-detection at all) for this URL shape.
     /-share-(\d+)-/, // /posts/user_slug_title-share-1234567890-abcd
+    // Live bug (2026-07-23): clicking "Open" on a notification lead
+    // navigates to /feed/?highlightedUpdateUrn=urn%3Ali%3Aactivity%3A.../
+    // — an "activity" URN (not ugcPost) with its colons percent-encoded.
+    // The unencoded form is already covered by the first pattern above
+    // (`activity[:-](\d+)` matches "activity:123..."), but there was no
+    // encoded counterpart the way ugcPost already has one, so this exact
+    // page — the one every "Open" click on a notification lead lands on —
+    // silently produced no activity ID at all, no matter how many times
+    // the page was refreshed.
+    /urn%3Ali%3Aactivity%3A(\d+)/, // ?highlightedUpdateUrn=urn%3Ali%3Aactivity%3A1234567890
   ];
   for (const re of patterns) {
     const m = url.match(re);
