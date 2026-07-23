@@ -268,8 +268,24 @@ function _isOwnName(t) {
 // re-scan it happened to sort ahead of the real reply and overwrote it.
 // Requiring a nearby "Reply" action rejects that kind of noise, since
 // nothing outside the comments section has one.
-function _looksLikeCommentReply(containerText) {
-  return /\bReply\b/.test(containerText);
+//
+// Live bug (2026-07-23): this extension's own side panel permanently
+// narrows the LinkedIn column it sits next to (confirmed live: every
+// screenshot of this bug showed a ~400px-wide LinkedIn column squeezed
+// beside the panel) — narrow enough that LinkedIn renders comment
+// actions as icon-only buttons with no visible "Reply" text at all, the
+// label lives only in aria-label. A genuinely real reply was being
+// rejected as "page noise" on every single scan under normal, everyday
+// use of this extension, not just as a rare edge case. Checking
+// aria-label too (not just visible textContent, which never sees
+// attribute values) catches the icon-only case without losing the
+// original noise-rejection property — nothing outside the comments
+// section has an aria-label containing "Reply" either.
+function _looksLikeCommentReply(wrapperEl, containerText) {
+  if (/\bReply\b/.test(containerText)) return true;
+  return Array.from(wrapperEl.querySelectorAll("[aria-label]")).some((el) =>
+    /\bReply\b/i.test(el.getAttribute("aria-label") || "")
+  );
 }
 
 // Climb one ancestor level at a time (rather than jumping straight to a
@@ -298,7 +314,7 @@ function _findReplyAuthorNear(mentionLink, maxDepth, maxWrapperTextLen) {
     });
     if (other) {
       log(`    found distinct author link "${_cleanText(other)}" at depth ${depth} (wrapper text length ${wrapperText.length})`);
-      return { authorLink: other, wrapperText };
+      return { authorLink: other, wrapperText, wrapperEl: el };
     }
   }
   return null;
@@ -322,12 +338,12 @@ function _findOwnCommentReplies() {
       log(`  no distinct author found within climb/text caps — skipping`);
       return;
     }
-    if (!_looksLikeCommentReply(found.wrapperText)) {
+    if (!_looksLikeCommentReply(found.wrapperEl, found.wrapperText)) {
       log(`  no "Reply" action found nearby — this isn't a real comment (likely unrelated page noise), skipping`);
       return;
     }
 
-    const replyAuthor = _cleanText(found.authorLink);
+    const replyAuthor = _firstLine(found.authorLink);
     const replyText = bodyText.replace(new RegExp(`^${OWN_NAME}\\s*`), "").trim();
     log(`  => reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
     if (replyText) results.push({ replyAuthor, replyText });
@@ -405,7 +421,7 @@ function _findRepliesUnderOwnComment() {
         return !!(ownContainer.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
       });
       if (candidateLinks.length) {
-        found = { authorLink: candidateLinks[0], wrapperText };
+        found = { authorLink: candidateLinks[0], wrapperText, wrapperEl: el };
         log(`  own-comment #${i}: found distinct profile link "${_cleanText(candidateLinks[0])}" at depth ${depth} (wrapper text length ${wrapperText.length})`);
         break;
       }
@@ -414,11 +430,11 @@ function _findRepliesUnderOwnComment() {
       log(`  own-comment #${i}: no distinct profile link found within climb — no reply (yet)`);
       return;
     }
-    if (!_looksLikeCommentReply(found.wrapperText)) {
+    if (!_looksLikeCommentReply(found.wrapperEl, found.wrapperText)) {
       log(`  own-comment #${i}: nearest profile link has no "Reply" action nearby — not a real comment, skipping`);
       return;
     }
-    const replyAuthor = _cleanText(found.authorLink);
+    const replyAuthor = _firstLine(found.authorLink);
     const bodyContainer = _boundedContainer(found.authorLink, replyAuthor.length + 5, 2000, 5);
     const replyText = _cleanText(bodyContainer).replace(new RegExp(`^${replyAuthor}\\s*`), "").trim();
     log(`  own-comment #${i}: structural match — reply from "${replyAuthor}": "${replyText.slice(0, 150)}"`);
@@ -795,7 +811,20 @@ function _firstLine(el) {
   const firstLine = text.split("\n").map((l) => l.trim()).find((l) => l.length > 0) || "";
   // Strip a trailing "• 3rd+" / "• 1st" connection-degree badge, which
   // renders on the same line as the name itself.
-  return firstLine.replace(/\s*•\s*(1st|2nd|3rd\+?|\d+(st|nd|rd|th)\+?)\s*$/i, "").trim();
+  //
+  // Live bug (2026-07-23): reusing this for a comment/reply author link
+  // (not just a post author) surfaced a badge this function hadn't seen
+  // before — LinkedIn tags a comment from the post's own author with an
+  // "Author" pill directly after their name, on the SAME rendered line,
+  // with no separating space or bullet at all (e.g. "Abiha Mubashir" +
+  // "Author" -> "Abiha MubashirAuthor" once flattened) — so even the
+  // line-split above doesn't isolate just the name. Strip it the same
+  // way as the degree badge, \s* handles both the zero-space-glued case
+  // seen live and a properly-spaced one.
+  return firstLine
+    .replace(/\s*•\s*(1st|2nd|3rd\+?|\d+(st|nd|rd|th)\+?)\s*$/i, "")
+    .replace(/\s*(Author|Premium)\s*$/i, "")
+    .trim();
 }
 
 function _findPostAuthor(card) {
