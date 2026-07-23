@@ -223,17 +223,34 @@ function _scrapeOwnRecentPosts(limit) {
 // link, then grabs the body text right after it.
 function _findOwnCommentText() {
   if (!OWN_NAME) return null;
+  // Live bug (2026-07-23): the account's own profile-card widget (left
+  // sidebar) has "Max Irwin" as a heading immediately followed by the
+  // account's headline/bio text — structurally identical to "name
+  // heading, then body text", the exact shape this function looks for —
+  // and it sits EARLIER in DOM order than an actual comment further down
+  // the page, so it silently won every time. Confirmed live: this
+  // returned "Growth & Partnerships @ AppBuild.DIY..." (the bio) as the
+  // scraped comment text instead of what was actually typed on the post.
+  // Requiring a nearby Reply action (the same signal _looksLikeCommentReply
+  // already uses to distinguish a real comment from page noise elsewhere)
+  // rules out the profile card, which has no such action near it.
+  //
+  // Also switched the exact `t === OWN_NAME` match to _isOwnName, for the
+  // same reason it's used everywhere else that isn't this function: a
+  // trailing badge glued directly onto the name (no separating
+  // whitespace — already confirmed live for other people's names
+  // elsewhere on this exact page class) would otherwise fail an exact
+  // match and silently produce zero candidates.
   const candidates = Array.from(document.querySelectorAll("span, div, a")).filter((el) => {
     if (el.children.length > 0) return false; // want a leaf text node's element, not a wrapper
-    const t = _cleanText(el);
-    return t === OWN_NAME;
+    return _isOwnName(_cleanText(el));
   });
   for (const heading of candidates) {
     let el = heading;
     for (let depth = 0; depth < 6 && el.parentElement; depth++) {
       el = el.parentElement;
       const t = _cleanText(el);
-      if (t.length > OWN_NAME.length + 15 && t.length < 2000) {
+      if (t.length > OWN_NAME.length + 15 && t.length < 2000 && _looksLikeCommentReply(el, t)) {
         const body = t.startsWith(OWN_NAME) ? t.slice(OWN_NAME.length).trim() : t;
         if (body) return body;
       }
@@ -371,9 +388,18 @@ function _findRepliesUnderOwnComment() {
   // Same technique _findOwnCommentText uses: our own name isn't hyperlinked
   // in our own comment's author heading, so look for a short unlinked leaf
   // node whose text is exactly our name.
+  //
+  // Live bug (2026-07-23): "exactly our name" was a strict `=== OWN_NAME`
+  // match with zero tolerance — but a badge can be glued directly onto a
+  // name with no separating whitespace (confirmed live for other
+  // people's names via the "Author" badge fix earlier), which would fail
+  // this exact match and produce zero headings, silently killing the
+  // whole structural fallback. _isOwnName already tolerates exactly this
+  // (used everywhere else that matches OWN_NAME against page text) —
+  // using it here too instead of a one-off strict comparison.
   const headings = Array.from(document.querySelectorAll("span, div, a")).filter((el) => {
     if (el.children.length > 0) return false;
-    return _cleanText(el) === OWN_NAME;
+    return _isOwnName(_cleanText(el));
   });
   log(`structural fallback: found ${headings.length} own-comment heading(s)`);
 
