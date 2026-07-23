@@ -485,12 +485,23 @@ async def draft_reply(body: dict, authorization: str = Header(default="")):
     reply_text = body.get("replyText")
     post_text = body.get("postText")
     own_comment = body.get("ownComment")
-    if not reply_text or not (post_text or own_comment):
-        raise HTTPException(
-            status_code=400,
-            detail="replyText and at least one of postText/ownComment are required",
-        )
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="replyText is required")
 
+    # Live bug (2026-07-23): this used to also hard-require at least one of
+    # postText/ownComment, checked BEFORE the Airtable lookup below ever
+    # ran — so a post that content.js's live scraping failed on (narrow
+    # side-panel-squeezed layouts, unusual thread structures, whatever
+    # LinkedIn markup variation) got a bare 400 with no draft at all, even
+    # when postUrl matched a record already holding both pieces of text in
+    # Airtable. Worse: claude_client.draft_reply already tolerates BOTH
+    # being empty via the "(original post text not available)" /
+    # "(original comment not available)" placeholders a few lines below —
+    # this endpoint was blocking a path the drafting logic was already
+    # built to handle gracefully. Only replyText (always present — it's
+    # what triggered this whole flow) is actually required; the Airtable
+    # lookup below still gets a chance to backfill post_text/own_comment
+    # regardless of what scraping did or didn't find.
     item = await airtable_store.get_item_by_post_url(post_url) if post_url else None
     if item and item.get("commentary"):
         post_text = item["commentary"]
