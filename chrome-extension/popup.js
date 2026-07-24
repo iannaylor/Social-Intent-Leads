@@ -1,3 +1,31 @@
+// Kept in sync BY HAND with the identically-named function in content.js —
+// the two run in separate script contexts with no shared module.
+//
+// Live bug (2026-07-24): every backend fetch() in this file used to do
+// `r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || r.status))`
+// — calling .json() even on the error branch. If the backend (or Render,
+// or a proxy in front of it — a cold start, a 502, a timeout) returned
+// anything that wasn't valid JSON, that .json() call itself threw a raw
+// "SyntaxError: Unexpected token '<'..." (the start of an HTML error
+// page), which surfaced to the user as a cryptic JS parse error instead
+// of a readable message — confirmed live on /queue/draft-reply. Reading
+// the body as text first means a non-JSON response always degrades to a
+// clean "Server error (nnn)" message instead of a raw parse error,
+// regardless of which endpoint or which kind of failure caused it.
+function _parseApiResponse(r) {
+  return r.text().then((text) => {
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch (e) {
+      if (r.ok) return {};
+      return Promise.reject(`Server error (${r.status}) — the backend didn't return a valid response`);
+    }
+    if (r.ok) return body;
+    return Promise.reject((body && body.detail) || `Server error (${r.status})`);
+  });
+}
+
 const progressEl = document.getElementById("progress");
 const contentEl = document.getElementById("content");
 const navQueueBtn = document.getElementById("navQueue");
@@ -279,7 +307,7 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({}),
     })
-      .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+      .then(_parseApiResponse)
       .then((res) => {
         if (!res.processed) {
           msg.textContent = "No failed drafts found — nothing to do.";
@@ -323,7 +351,7 @@ function renderSettingsBody(cfg, autoSkip, voice, ownName, liveOverlay) {
           body: JSON.stringify({ linkedinUrl, posts: resp.posts }),
         });
       })
-      .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+      .then(_parseApiResponse)
       .then((res) => {
         document.getElementById("fVoiceBrief").value = res.voiceBrief || "";
         genMsg.textContent = `Drafted from ${res.postsAnalyzed || 0} recent posts — edit below, then Save.`;
@@ -810,7 +838,7 @@ function renderFromQueue() {
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
               body: JSON.stringify({ postUrl: item.postUrl }),
             })
-              .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+              .then(_parseApiResponse)
               .then((res) => {
                 // Mutate the item in place and re-render — this turns the
                 // skip card into a normal comment card immediately, no
@@ -838,7 +866,7 @@ function renderFromQueue() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
                 body: JSON.stringify({ postUrl: item.postUrl }),
               })
-                .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+                .then(_parseApiResponse)
                 .then((res) => {
                   item.action = res.action;
                   item.skipReason = res.skipReason || null;
@@ -887,7 +915,7 @@ function renderFromQueue() {
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
               body: JSON.stringify({ postUrl: item.postUrl }),
             })
-              .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+              .then(_parseApiResponse)
               .then((res) => {
                 item.comment = res.comment;
                 document.getElementById("commentBox").value = res.comment || "";
@@ -2158,7 +2186,7 @@ function renderDmBanner(otherName, messageText, found, errorMsg) {
           ownComment: found.ownComment,
         }),
       })
-        .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+        .then(_parseApiResponse)
         .then((res) => {
           const draft = res.replyText || "";
           draftArea.innerHTML = `
@@ -2238,7 +2266,7 @@ function renderReplyBanner(item, reply, activityId, postText, ownComment) {
           ownComment,
         }),
       })
-        .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(e.detail || r.status))))
+        .then(_parseApiResponse)
         .then((res) => {
           draftArea.innerHTML = `
             <textarea id="replyDraftBox">${res.replyText || ""}</textarea>

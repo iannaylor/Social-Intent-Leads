@@ -1,3 +1,23 @@
+// Kept in sync BY HAND with the identically-named function in popup.js —
+// the two run in separate script contexts with no shared module. See that
+// copy's comment for the full rationale (live bug 2026-07-24: a non-JSON
+// error response, e.g. an HTML page from a proxy/cold-start/crash, used
+// to surface as a raw "SyntaxError: Unexpected token '<'" instead of a
+// readable message).
+function _parseApiResponse(r) {
+  return r.text().then((text) => {
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch (e) {
+      if (r.ok) return {};
+      return Promise.reject(`Server error (${r.status}) — the backend didn't return a valid response`);
+    }
+    if (r.ok) return body;
+    return Promise.reject((body && body.detail) || `Server error (${r.status})`);
+  });
+}
+
 // Runs on every LinkedIn page. Two jobs:
 //  1. Identify which post (by LinkedIn's numeric activity ID) the user is
 //     currently looking at, regardless of which of LinkedIn's several URL
@@ -1040,7 +1060,7 @@ function _injectOverlayBadge(card, match, post) {
         authorProfileUrl: post.profileUrl,
       }),
     })
-      .then((r) => (r.ok ? r.json() : r.json().then((e2) => Promise.reject(e2.detail || r.status))))
+      .then(_parseApiResponse)
       .then((res) => {
         const comment = res.comment || "";
         navigator.clipboard.writeText(comment).catch(() => {});
