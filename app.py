@@ -514,14 +514,28 @@ async def draft_reply(body: dict, authorization: str = Header(default="")):
     else:
         product_config = await products_store.infer_product_from_text(post_text or own_comment or "")
 
-    draft = await claude_client.draft_reply(
-        product_config,
-        post_text or "(original post text not available)",
-        own_comment or "(original comment not available)",
-        reply_text,
-        item.get("score", 0) if item else 0,
-        voice_profile,
-    )
+    # Live bug (2026-08-06): unlike every other drafting endpoint in this
+    # file (/queue/generate-comment, the bulk-regenerate loop), this one
+    # had no try/except around the Claude call at all — a transient
+    # failure (rate limit, timeout, the model not calling the expected
+    # tool) crashed with a raw unhandled exception. FastAPI/Starlette's
+    # default handler for an exception that ISN'T an HTTPException returns
+    # PLAIN TEXT, not JSON — confirmed live: the extension's error handling
+    # correctly caught the non-JSON body and showed "Server error (500)",
+    # but with no way to tell what actually went wrong. Catching it here
+    # and surfacing the real message means the next failure is diagnosable
+    # from the UI alone instead of needing server logs.
+    try:
+        draft = await claude_client.draft_reply(
+            product_config,
+            post_text or "(original post text not available)",
+            own_comment or "(original comment not available)",
+            reply_text,
+            item.get("score", 0) if item else 0,
+            voice_profile,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Reply drafting failed: {e}")
     return {"replyText": draft.get("replyText")}
 
 
