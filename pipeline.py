@@ -139,7 +139,16 @@ async def search_and_score(
             try:
                 result = await richapi.call(
                     "post_keyword_search",
-                    {"keyword": kw, "datePosted": recency, "sort": "DATE_POSTED", "size": 30},
+                    # RichAPI's 2026-08-06 breaking field-name rollout renamed
+                    # "size" to "limit" for this endpoint (confirmed against
+                    # their own migration table — the only field this
+                    # endpoint's rollout touched; keyword/datePosted/sort are
+                    # unaffected). A field sent under its old name is now
+                    # silently ignored rather than erroring, so this was
+                    # quietly requesting an unbounded/default result count
+                    # instead of 30 per keyword since the rollout, with no
+                    # error to signal it.
+                    {"keyword": kw, "datePosted": recency, "sort": "DATE_POSTED", "limit": 30},
                 )
             except Exception as e:
                 # One keyword failing (a transient RichAPI/network hiccup)
