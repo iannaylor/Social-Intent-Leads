@@ -304,7 +304,7 @@ async def generate_comment(body: dict, authorization: str = Header(default="")):
 @app.post("/queue/retry-enrichment")
 async def retry_enrichment(body: dict, authorization: str = Header(default="")):
     """A genuine retry, not an override: re-runs the actual ICP
-    verification (enrich_profile + company_enricher) for a candidate that
+    verification (enrich_profile) for a candidate that
     got skipped because that call failed transiently — distinct from
     /queue/generate-comment, which bypasses verification entirely rather
     than re-attempting it. Live feedback (2026-07-21): a RichAPI account

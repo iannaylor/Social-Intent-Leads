@@ -12,7 +12,7 @@ else as "pending_batch" (found and scored, not yet enriched or drafted).
 Nothing is lost or hidden at this stage.
 
 Phase 2 — process_batch(): the expensive part (enrich_profile,
-company_enricher, find_emails/verify_emails, Claude drafting), run only on
+find_emails/verify_emails, Claude drafting), run only on
 a caller-specified batch size at a time, highest-priority candidates
 first, pulled from the pending_batch pool written by phase 1. Can be
 called any time later — the pool is durable in Airtable, not held in
@@ -385,24 +385,29 @@ async def process_batch(
 
             company = profile_data.get("company") or {}
             domain = (company.get("website") or "").replace("https://", "").replace("http://", "").split("/")[0]
+            # Company-size enrichment is disabled: there is no RichAPI
+            # endpoint that enriches by domain. `enrich_company` is real but
+            # requires a LinkedIn *company page* URL, which enrich_profile
+            # doesn't return (confirmed against RichAPI's own docs,
+            # 2026-08-21) — only company.website/domain. The previous code
+            # called a tool named "company_enricher" with {"domain": ...},
+            # which isn't a real RichAPI tool and has always failed silently
+            # here, at zero cost since it never reached RichAPI's billing.
+            # Wiring this up properly would mean adding a company_search +
+            # enrich_company call per candidate (net new paid calls) — a
+            # deliberate cost tradeoff, not a bug fix, so left for a future
+            # decision rather than done here. size_ok stays unknown/None,
+            # exactly as it already did before this comment existed.
             size_ok = None  # None = unknown/unverified, distinct from False
             employee_count = None
             industry = None
-            if domain:
-                try:
-                    company_data = await richapi.call("company_enricher", {"domain": domain})
-                    employee_count = company_data.get("employee_count")
-                    industry = company_data.get("industry")
-                    if isinstance(employee_count, int):
-                        size_ok = icp_size_min <= employee_count <= icp_size_max
-                except Exception as e:
-                    print(f"[pipeline] run {run_id}: company_enricher failed for {domain}: {e}", flush=True)
 
             location_ok = _location_matches(profile_data, icp_location)
 
             c["_headline"] = headline
             c["_employee_count"] = employee_count
             c["_industry"] = industry
+            c["_domain"] = domain
 
             # Location, when requested, is a hard requirement — it's the one
             # dimension the user explicitly wants enforced, not just a soft
@@ -462,14 +467,29 @@ async def process_batch(
                 for c in qualified:
                     if not c.get("profileUrl"):
                         continue
-                    try:
-                        profile_data = await richapi.call("enrich_profile", {"url": c["profileUrl"]})
-                    except Exception:
-                        continue
-                    domain = (profile_data.get("company") or {}).get("website")
-                    if not domain:
-                        continue
-                    domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
+                    if "_domain" in c:
+                        # Reuse the domain STEP 4 already paid an
+                        # enrich_profile call to get, instead of calling
+                        # enrich_profile again on the same URL — this was
+                        # doubling the pipeline's most expensive call for
+                        # every qualified candidate that went through STEP 4.
+                        domain = c["_domain"]
+                        if not domain:
+                            continue
+                    else:
+                        # Influencer-survivor candidates (connectReason ==
+                        # "influencer") bypass STEP 4's ICP loop entirely, so
+                        # they never got a domain cached. Fall back to a
+                        # fresh call here rather than silently dropping
+                        # email-finding coverage for this segment.
+                        try:
+                            profile_data = await richapi.call("enrich_profile", {"url": c["profileUrl"]})
+                        except Exception:
+                            continue
+                        domain = (profile_data.get("company") or {}).get("website")
+                        if not domain:
+                            continue
+                        domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
                     name_parts = c["name"].split(" ", 1)
                     email_targets.append(
                         {
@@ -580,7 +600,7 @@ async def retry_enrichment(
     it anyway, unverified" (the existing /queue/generate-comment override)
     existed, which is a different thing entirely from retrying the actual
     verification step. This re-runs ICP qualification for ONE already-
-    stored item, same enrich_profile + company_enricher + title/size/
+    stored item, same enrich_profile + title/size/
     location logic process_batch's STEP 4 loop uses, and drafts a comment
     if it now qualifies (same as STEP 6) — a genuine retry, not a bypass.
 
@@ -604,18 +624,11 @@ async def retry_enrichment(
         headline = profile_data.get("headline") or ""
         title_ok = any(t.lower() in headline.lower() for t in icp_titles)
 
-        company = profile_data.get("company") or {}
-        domain = (company.get("website") or "").replace("https://", "").replace("http://", "").split("/")[0]
+        # Company-size enrichment disabled here too — see the matching
+        # comment in process_batch's STEP 4. "company_enricher" was never a
+        # real RichAPI tool; size_ok has always been None/unknown.
         size_ok = None
         employee_count = None
-        if domain:
-            try:
-                company_data = await richapi.call("company_enricher", {"domain": domain})
-                employee_count = company_data.get("employee_count")
-                if isinstance(employee_count, int):
-                    size_ok = icp_size_min <= employee_count <= icp_size_max
-            except Exception as e:
-                print(f"[pipeline] retry_enrichment: company_enricher failed for {domain}: {e}", flush=True)
 
         location_ok = _location_matches(profile_data, icp_location)
         location_fails = icp_location and location_ok is False
