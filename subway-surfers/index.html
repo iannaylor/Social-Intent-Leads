@@ -1068,7 +1068,7 @@ function setView(v) {
    ============================================================ */
 const STREET_LANE_OFF = [0, 1.75, 3.5], STREET_COIN_SCALE = 0.72, STREET_FOV = 62;   // lanes: camera track (left lane), centre line, right lane
 const laneEyeX = () => ((player.x + 2.6) / 5.2) * 3.5;
-const street = { active: false, runStart: 0, lastMoveEnd: 0, lastMoveDur: 800, heading: null, camActive: false, camFn: null, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
+const street = { active: false, runStart: 0, playing: false, playSpeed: 0, heading: null, camActive: false, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
 const streetEl = $('street');
 function loadScript(url) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = url; el.onload = res; el.onerror = () => rej(new Error('script ' + url)); document.head.appendChild(el); }); }
 function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
@@ -1231,7 +1231,12 @@ function makeStreetRenderer() {
       r.setSize(c.width, c.height, false);
       T3.tmp.fromArray(viewMatrix).invert();
       T3.camPos.setFromMatrixPosition(T3.tmp);
-      if (!street.camActive) street.s = projectToPath(T3.camPos.x, T3.camPos.y);
+      street.s = projectToPath(T3.camPos.x, T3.camPos.y);
+      const groundY = T3.camPos.z - street.camH;
+      for (const o of street.objs) o.g.position.y = groundY + (o.type === 'coin' ? o.y : 0);
+      if (T3.ribbon) { const q = pathAt(street.s); if (q) T3.ribbon.position.y = T3.camPos.z - q.u; }
+      T3.off.makeTranslation(((player.x + 2.6) / 5.2) * 1.2, player.y - (player.rolling > 0 ? 0.55 : 0) + Math.sin(player.runPhase * 2) * 0.02, 0);
+      T3.tmp.multiply(T3.off);
       T3.camera.matrix.copy(T3.tmp); T3.camera.updateMatrixWorld(true);
       T3.camera.projectionMatrix.fromArray(projectionMatrix); T3.camera.projectionMatrixInverse.copy(T3.camera.projectionMatrix).invert();
       // sun follows the eye (in the child frame: x east, y up, -z north)
@@ -1319,21 +1324,25 @@ function releaseStreetObj(o) { o.g.visible = false; o.g.scale.setScalar(1); if (
 function clearStreetObjs() { for (const o of street.objs) releaseStreetObj(o); street.objs.length = 0; }
 
 /* ---- driving: keep stepping to the next image; the viewer animates the camera between them */
+const seqComp = () => { try { return street.viewer.getComponent('sequence'); } catch (e) { return null; } };
+function setPlaySpeed(v) { if (Math.abs(v - street.playSpeed) < 0.01) return; street.playSpeed = v; try { const ps = street.viewer._navigator && street.viewer._navigator.playService; if (ps && ps.setSpeed) ps.setSpeed(v); } catch (e) { /* ignore */ } }
 function streetDrive() {
-  if (!street.viewer || street.moving || street.ended || state.mode !== 'run') return;
-  const P = street.path; if (P.length < 2) return;
-  let j = street.segHint; while (j + 1 < P.length && P[j + 1].s <= street.s) j++; while (j > 0 && P[j].s > street.s) j--; street.segHint = j;
-  const want = P[j].idx;
-  if (want > street.index) {
-    street.moving = true;
-    street.viewer.moveTo(street.ids[want]).then((img) => { street.index = want; street.moving = false; faceDownRoad(img); }).catch(() => { street.index = want; street.moving = false; });
+  if (!street.viewer || street.ended) return;
+  const want = state.mode === 'run';
+  // playback speed: 0.36 -> ~8 m/s at start, 0.48 -> ~13 m/s later (viewer maps 0..1 onto its transition rate)
+  if (want) setPlaySpeed(0.36 + clamp((street.s - street.runStart) / 900, 0, 1) * 0.12);
+  if (want !== street.playing) {
+    const sc = seqComp(); street.playing = want;
+    try { if (sc) { if (want) sc.play(); else sc.stop(); } } catch (e) { /* ignore */ }
   }
 }
 function streetWrap() {
+  if (street.ended) return;
   street.ended = true; $('fade').style.opacity = 1;
   setTimeout(() => {
-    clearStreetObjs(); street.index = 0; street.segHint = 0; street.s = 0; street.heading = null; street.runStart = 0;
-    street.viewer.moveTo(street.ids[0]).then(() => { street.ended = false; street.moving = false; street.nextSpawn = 60; $('fade').style.opacity = 0; }).catch(() => { street.ended = false; street.moving = false; $('fade').style.opacity = 0; });
+    clearStreetObjs(); street.index = 0; street.segHint = 0; street.runStart = 0;
+    const sc = seqComp(); try { if (sc) sc.stop(); } catch (e) { /* ignore */ } street.playing = false;
+    street.viewer.moveTo(street.ids[0]).then(() => { street.ended = false; street.nextSpawn = 60; $('fade').style.opacity = 0; }).catch(() => { street.ended = false; $('fade').style.opacity = 0; });
   }, 350);
 }
 function faceDownRoad(img) {
@@ -1365,20 +1374,20 @@ async function startStreet(place) {
   streetEl.classList.add('on'); streetEl.innerHTML = '';
   const viewer = new window.mapillary.Viewer({
     accessToken: token, container: streetEl, imageId: start.ids[start.index], trackResize: true,
-    component: { cover: false, direction: false, sequence: false, zoom: false, bearing: false, keyboard: false, pointer: false, attribution: true, cache: true, spatial: false },
+    component: { cover: false, direction: false, sequence: { visible: false, playing: false }, zoom: false, bearing: false, keyboard: false, pointer: false, attribution: true, cache: true, spatial: false },
   });
   v0 = viewer;
   street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.pano = start.pano; street.camH = start.pano ? 2.2 : 1.45;
-  street.moving = false; street.ended = false; street.s = 0; street.lastS = 0; street.speed = 0; street.segHint = 0; street.path = []; street.heading = null; street.camActive = false;
+  street.moving = false; street.ended = false; street.s = 0; street.lastS = 0; street.speed = 0; street.segHint = 0; street.path = []; street.heading = null; street.camActive = false; street.playing = false; street.playSpeed = 0;
   viewer.on('image', (ev) => {
     const img = ev.image; if (!img) return;
     const ll = img.computedLngLat || img.lngLat;
     const i = street.ids.indexOf(img.id); if (i >= 0) street.index = i;
+    if (i >= street.ids.length - 2 && state.mode === 'run') streetWrap();
     if (ll && !(street.pos[img.id] && street.pos[img.id].ll)) { street.pos[img.id] = { ll: { lat: ll.lat, lng: ll.lng }, compass: img.computedCompassAngle, alt: img.computedAltitude }; buildPath(); }
     faceDownRoad(img);
   });
   viewer.addCustomRenderer(makeStreetRenderer());
-  try { viewer.attachCustomCameraControls(makeCameraControls()); viewer.setCameraControls(window.mapillary.CameraControls.Custom); } catch (e) { console.warn('custom camera unavailable', e); }
   await new Promise((res) => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; viewer.on('load', fin); viewer.on('image', fin); setTimeout(fin, 6000); });
   if (!street.ref) { try { street.ref = await viewer.getReference(); buildPath(); } catch (e) { /* ignore */ } }
   { const pt = street.path.find((q) => q.idx >= street.index); street.s = pt ? pt.s : 0; street.heading = null; street.segHint = 0; }
@@ -1394,7 +1403,7 @@ async function startStreet(place) {
   setStreetStatus('Street imagery loaded. Run!');
 }
 function stopStreet() {
-  if (street.viewer) { try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; v0 = null; }
+  if (street.viewer) { try { const sc = seqComp(); if (sc) sc.stop(); } catch (e) { /* ignore */ } try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; v0 = null; }
   streetEl.classList.remove('on'); streetEl.innerHTML = '';
   clearStreetObjs();
   if (street.active) {
@@ -1560,7 +1569,7 @@ async function startRun() {
 }
 function beginRun() {
   audioInit(); resetWorld(); state.mode = 'run';
-  if (street.active) { clearStreetObjs(); street.runStart = street.s; street.nextSpawn = street.s + 120; street.ended = false; }
+  if (street.active) { clearStreetObjs(); street.runStart = street.s; street.nextSpawn = street.s + 120; street.ended = false; player.lane = 0; player.prevLane = 0; player.x = LANE_X[0]; }
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
   $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
