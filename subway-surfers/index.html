@@ -1180,9 +1180,9 @@ function setStreetStatus(msg, bad) { const n = $('streetNote'); n.innerHTML = ms
 /* 360 photos near the point, ordered along their sequence so successive skies follow a road */
 async function findPanos(lat, lon, token) {
   const here = { lat, lng: lon };
-  for (const half of [0.006, 0.02, 0.05]) {
+  for (const half of [0.006, 0.02, 0.05, 0.1, 0.2]) {
     const bbox = [lon - half, lat - half, lon + half, lat + half].join(',');
-    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,thumb_2048_url,computed_geometry,computed_compass_angle,sequence,captured_at&is_pano=true&bbox=${bbox}&limit=300`);
+    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,thumb_2048_url,computed_geometry,computed_compass_angle,sequence,captured_at&is_pano=true&bbox=${bbox}&limit=500`);
     if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Mapillary rejected the token.' : 'Mapillary search failed (' + r.status + ').');
     const j = await r.json(); const imgs = (j.data || []).filter((i) => i.thumb_2048_url && i.computed_geometry);
     if (!imgs.length) continue;
@@ -1196,7 +1196,7 @@ async function findPanos(lat, lon, token) {
     for (let i = 0; i < list.length; i++) { const nxt = list[i + 1]; list[i].travel = nxt && haversine(list[i].ll, nxt.ll) > 2 ? bearing(list[i].ll, nxt.ll) : (list[i].computed_compass_angle !== undefined ? list[i].computed_compass_angle : 0); }
     // thin out photos closer than 60 m apart so each sky change is a real change of scene
     const out = [list[0]]; for (const im of list.slice(1)) if (haversine(out[out.length - 1].ll, im.ll) > 60) out.push(im);
-    return out.slice(0, 24);
+    const res = out.slice(0, 24); res.distanceKm = imgs[0].dist / 1000; return res;
   }
   return [];
 }
@@ -1230,7 +1230,7 @@ async function showPano(idx, instant) {
     street.panoIdx = idx; street.fade = instant ? 1 : 0.0001;
     if (instant) { from.visible = false; street.sky = to; street.skyB = from; }
     if (street.panos[idx + 1]) loadPanoTexture(street.panos[idx + 1]).catch(() => {});
-    $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · 360 ' + (idx + 1) + '/' + street.panos.length;
+    $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · 360 ' + (idx + 1) + '/' + street.panos.length + (street.panos.distanceKm > 1.5 ? ' · ' + street.panos.distanceKm.toFixed(0) + ' KM AWAY' : '');
   } catch (e) { /* keep the current sky */ } finally { street.loading = false; }
 }
 async function startStreet(place) {
@@ -1243,7 +1243,7 @@ async function startStreet(place) {
   street.active = true;
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
   applyStreetLighting(true);
-  if (panos.length) { await showPano(0, true); street.nextSwapD = 260; setStreetStatus('Found ' + panos.length + ' 360° photos. Run!'); }
+  if (panos.length) { await showPano(0, true); street.nextSwapD = 260; const far = panos.distanceKm > 1.5 ? ' The nearest 360° coverage is ' + panos.distanceKm.toFixed(1) + ' km away, so the surroundings come from there.' : ''; setStreetStatus('Found ' + panos.length + ' 360° photos.' + far + ' Run!'); }
   else { street.sky.visible = false; street.skyB.visible = false; setStreetStatus('No 360° photos near there yet, running with a plain sky. Try a town centre for real surroundings.'); }
   $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + (panos.length ? '' : ' · PLAIN SKY');
 }
