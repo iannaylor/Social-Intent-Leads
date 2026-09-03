@@ -1085,24 +1085,46 @@ async function geocode(q) {
   throw new Error('Could not find that place.');
 }
 function haversine(a, b) { const R = 6371000, dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lng - a.lng) * Math.PI / 180; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
+function bearing(a, b) { const y = Math.sin((b.lng - a.lng) * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180); const x = Math.cos(a.lat * Math.PI / 180) * Math.sin(b.lat * Math.PI / 180) - Math.sin(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.cos((b.lng - a.lng) * Math.PI / 180); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; }
+function angleDiff(a, b) { let d = Math.abs(((a - b) % 360 + 540) % 360 - 180); return d; }
+const geoOf = (img) => ({ lat: img.computed_geometry.coordinates[1], lng: img.computed_geometry.coordinates[0] });
+/* Find a street sequence near the point whose camera faces along the road: 360 imagery (which we can
+   turn to face the travel direction) or forward-facing dashcam style imagery. Sideways sequences are rejected. */
 async function findStart(lat, lon, token) {
-  for (const half of [0.003, 0.008, 0.02]) {
+  const here = { lat, lng: lon };
+  for (const half of [0.004, 0.012, 0.03]) {
     const bbox = [lon - half, lat - half, lon + half, lat + half].join(',');
-    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,computed_geometry,sequence,captured_at,is_pano&bbox=${bbox}&limit=200`);
+    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,computed_geometry,computed_compass_angle,sequence,captured_at,is_pano&bbox=${bbox}&limit=600`);
     if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Mapillary rejected the token.' : 'Mapillary search failed (' + r.status + ').');
     const j = await r.json(); const imgs = (j.data || []).filter((i) => i.sequence && i.computed_geometry);
-    if (!imgs.length) continue;
-    imgs.sort((a, b) => haversine({ lat, lng: lon }, { lat: a.computed_geometry.coordinates[1], lng: a.computed_geometry.coordinates[0] }) - haversine({ lat, lng: lon }, { lat: b.computed_geometry.coordinates[1], lng: b.computed_geometry.coordinates[0] }));
-    // prefer a sequence with plenty of images ahead
-    for (const img of imgs.slice(0, 6)) {
-      const rs = await fetch(`https://graph.mapillary.com/image_ids?access_token=${encodeURIComponent(token)}&sequence_id=${encodeURIComponent(img.sequence)}`);
+    const bySeq = new Map();
+    for (const im of imgs) { if (!bySeq.has(im.sequence)) bySeq.set(im.sequence, []); bySeq.get(im.sequence).push(im); }
+    const cands = [];
+    for (const [seq, list] of bySeq) {
+      if (list.length < 5) continue;
+      list.sort((a, b) => (a.captured_at || 0) - (b.captured_at || 0));
+      const pano = list.filter((i) => i.is_pano).length >= list.length * 0.8;
+      const devs = [];
+      for (let i = 0; i + 1 < list.length; i++) { const a = geoOf(list[i]), b = geoOf(list[i + 1]); if (haversine(a, b) < 1.5 || list[i].computed_compass_angle === undefined) continue; devs.push(angleDiff(list[i].computed_compass_angle, bearing(a, b))); }
+      devs.sort((a, b) => a - b); const med = devs.length ? devs[Math.floor(devs.length / 2)] : 999;
+      if (!pano && med > 32) continue;                    // camera not facing along the road
+      let nearest = null, nd = 1e9;
+      for (const im of list) { const d = haversine(here, geoOf(im)); if (d < nd) { nd = d; nearest = im; } }
+      cands.push({ seq, list, pano, med, nearest, dist: nd - (pano ? 120 : 0) });
+    }
+    cands.sort((a, b) => a.dist - b.dist);
+    for (const c of cands.slice(0, 6)) {
+      const rs = await fetch(`https://graph.mapillary.com/image_ids?access_token=${encodeURIComponent(token)}&sequence_id=${encodeURIComponent(c.seq)}`);
       if (!rs.ok) continue;
       const js = await rs.json(); const ids = (js.data || []).map((x) => x.id);
-      const idx = ids.indexOf(img.id);
-      if (ids.length >= 8 && idx >= 0) return { ids: ids.length - idx >= 8 ? ids : ids.slice().reverse(), index: ids.length - idx >= 8 ? idx : ids.length - 1 - idx };
+      const idx = ids.indexOf(c.nearest.id);
+      if (idx < 0 || ids.length < 8) continue;
+      const pos = {}; for (const im of c.list) pos[im.id] = { ll: geoOf(im), compass: im.computed_compass_angle };
+      if (ids.length - idx >= 8) return { ids, index: idx, pano: c.pano, pos, reversed: false };
+      if (c.pano) return { ids: ids.slice().reverse(), index: ids.length - 1 - idx, pano: true, pos, reversed: true };
     }
   }
-  throw new Error('No street imagery near there. Try a busier road.');
+  throw new Error('No road-facing street imagery near there. Try a main road or a town centre.');
 }
 function setStreetStatus(msg, bad) { const n = $('streetNote'); n.innerHTML = msg; n.style.color = bad ? '#e0705f' : ''; }
 async function startStreet(place) {
@@ -1123,12 +1145,15 @@ async function startStreet(place) {
     component: { cover: false, direction: false, sequence: false, zoom: false, bearing: false, keyboard: false, pointer: false, attribution: true, cache: true, spatial: false },
   });
   street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.lastLngLat = null; street.spacing = 8; street.moving = false; street.lastHopD = 0;
+  street.pano = start.pano; street.pos = start.pos || {};
   viewer.on('image', (ev) => {
     const img = ev.image; if (!img) return;
     const ll = img.computedLngLat || img.lngLat;
     if (ll && street.lastLngLat) { const d = haversine(street.lastLngLat, ll); if (d > 1) street.spacing = clamp(d, 3, 25); }
     if (ll) street.lastLngLat = ll;
     const i = street.ids.indexOf(img.id); if (i >= 0) street.index = i;
+    if (ll) { const rec = street.pos[img.id] || (street.pos[img.id] = {}); rec.ll = { lat: ll.lat, lng: ll.lng }; if (rec.compass === undefined && img.computedCompassAngle !== undefined) rec.compass = img.computedCompassAngle; }
+    faceDownRoad(img);
   });
   viewer.on('fov', () => viewer.getFieldOfView().then((f) => { street.fov = f; }).catch(() => {}));
   await new Promise((res) => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; viewer.on('load', fin); viewer.on('image', fin); setTimeout(fin, 6000); });
@@ -1147,6 +1172,19 @@ async function startStreet(place) {
   street.active = true; SPEEDS = STREET_SPEED; START_SPEED = SPEEDS.start; MAX_SPEED = SPEEDS.max; ACCEL = SPEEDS.accel;
   $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase();
   setStreetStatus('Street imagery loaded. Run!');
+}
+function faceDownRoad(img) {
+  if (!street.pano || !street.viewer) return;
+  const i = street.index, ids = street.ids;
+  const cur = street.pos[ids[i]] && street.pos[ids[i]].ll;
+  let ahead = null; for (let k = i + 1; k < Math.min(ids.length, i + 6) && !ahead; k++) if (street.pos[ids[k]] && street.pos[ids[k]].ll) ahead = street.pos[ids[k]].ll;
+  let behind = null; for (let k = i - 1; k >= Math.max(0, i - 6) && !behind; k--) if (street.pos[ids[k]] && street.pos[ids[k]].ll) behind = street.pos[ids[k]].ll;
+  if (!cur || (!ahead && !behind)) return;
+  const heading = ahead ? bearing(cur, ahead) : bearing(behind, cur);
+  const compass = (img && img.computedCompassAngle !== undefined) ? img.computedCompassAngle : (street.pos[ids[i]] && street.pos[ids[i]].compass);
+  if (compass === undefined) return;
+  let x = 0.5 + (heading - compass) / 360; x = x - Math.floor(x);
+  try { street.viewer.setCenter([x, 0.5]); } catch (e) { /* ignore */ }
 }
 function stopStreet() {
   if (street.viewer) { try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; }
@@ -1169,7 +1207,7 @@ function streetUpdate() {
   let next = street.index + 1;
   if (next >= street.ids.length) { next = 0; $('fade').style.opacity = 1; setTimeout(() => { $('fade').style.opacity = 0; }, 350); }
   street.moving = true;
-  street.viewer.moveTo(street.ids[next]).then(() => { street.index = next; street.moving = false; }).catch(() => { street.moving = false; });
+  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; street.moving = false; faceDownRoad(img); }).catch(() => { street.moving = false; });
 }
 async function geolocate() {
   return new Promise((res, rej) => {
