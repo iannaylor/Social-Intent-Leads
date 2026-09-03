@@ -1066,7 +1066,8 @@ function setView(v) {
    drawn with the viewer's own camera every frame (custom renderer), so
    they share its perspective, lens and motion.
    ============================================================ */
-const street = { active: false, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
+const STREET_LANE_SHIFT = 1.75, STREET_COIN_SCALE = 0.72;
+const street = { active: false, runStart: 0, lastMoveEnd: 0, lastMoveDur: 800, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
 const streetEl = $('street');
 function loadScript(url) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = url; el.onload = res; el.onerror = () => rej(new Error('script ' + url)); document.head.appendChild(el); }); }
 function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
@@ -1178,7 +1179,7 @@ function projectToPath(e, n) {
 function toChild(e, n, u) { return new THREE.Vector3(e, u, -n); }
 function placeOnPath(g, d, lane) {
   const q = pathAt(d); if (!q) return false;
-  const L = LANE_X[lane], e = q.e + L * Math.cos(q.th), n = q.n - L * Math.sin(q.th);
+  const L = LANE_X[lane] + STREET_LANE_SHIFT, e = q.e + L * Math.cos(q.th), n = q.n - L * Math.sin(q.th);
   g.position.copy(toChild(e, n, q.u - street.camH)); g.rotation.set(0, -q.th, 0);
   return true;
 }
@@ -1229,7 +1230,7 @@ function makeStreetRenderer() {
       T3.camPos.setFromMatrixPosition(T3.tmp);
       street.s = projectToPath(T3.camPos.x, T3.camPos.y);
       // lane change, jump and roll move the eye, not the photo
-      T3.off.makeTranslation(player.x, player.y - (player.rolling > 0 ? 0.55 : 0) + Math.sin(player.runPhase * 2) * 0.025, 0);
+      T3.off.makeTranslation(player.x + STREET_LANE_SHIFT, player.y - (player.rolling > 0 ? 0.55 : 0) + Math.sin(player.runPhase * 2) * 0.025, 0);
       T3.tmp.multiply(T3.off);
       T3.camera.matrix.copy(T3.tmp); T3.camera.updateMatrixWorld(true);
       T3.camera.projectionMatrix.fromArray(projectionMatrix); T3.camera.projectionMatrixInverse.copy(T3.camera.projectionMatrix).invert();
@@ -1244,22 +1245,22 @@ let v0 = null; // current viewer (for the renderer closure)
 
 /* ---- street obstacles: static objects along the path */
 function streetSpawn() {
-  const horizon = street.s + 110, total = pathLength();
+  const horizon = street.s + 130, total = pathLength();
   let guard = 0;
-  while (street.nextSpawn < horizon && street.nextSpawn + 6 < total && guard++ < 12) {
+  while (street.nextSpawn < horizon && street.nextSpawn + 6 < total && guard++ < 8) {
     const d = street.nextSpawn, lanes = [0, 1, 2], sh = lanes.slice().sort(() => Math.random() - 0.5);
-    const r = Math.random(), diff = clamp((street.s - 60) / 900, 0, 1);
-    if (r < 0.62) {
-      const blocked = Math.random() < 0.45 + diff * 0.4 ? 2 : 1;
-      for (let i = 0; i < blocked; i++) { const type = pick(['hurdle', 'gate', 'wall', 'hurdle', 'gate']); addStreetObj(spawnBarrierObj(type), type, sh[i], d); if (type === 'hurdle' && Math.random() < 0.6) streetCoinArc(sh[i], d - 4); }
-      const free = sh.slice(blocked); if (free.length && Math.random() < 0.7) streetCoinLine(pick(free), d - 3, 5);
-      street.nextSpawn = d + rand(15, 26) - diff * 7;
+    const r = Math.random(), diff = clamp((street.s - street.runStart - 150) / 900, 0, 1);
+    if (r < 0.6) {
+      const blocked = diff > 0.5 && Math.random() < 0.5 ? 2 : 1;
+      for (let i = 0; i < blocked; i++) { const type = pick(['hurdle', 'gate', 'hurdle', 'gate', 'wall']); addStreetObj(spawnBarrierObj(type), type, sh[i], d); if (type === 'hurdle' && diff > 0.3 && Math.random() < 0.5) streetCoinArc(sh[i], d - 4.5); }
+      if (Math.random() < 0.6) streetCoinLine(sh[blocked], d - 4, 4);
+      street.nextSpawn = d + lerp(34, 20, diff) + rand(0, 10);
     } else if (r < 0.85) {
-      let lane = irand(0, 2); for (let i = 0; i < 3; i++) { streetCoinLine(lane, d + i * 7, 4); lane = clamp(lane + (Math.random() < 0.5 ? -1 : 1), 0, 2); }
-      street.nextSpawn = d + 28;
+      streetCoinLine(irand(0, 2), d, 5);
+      street.nextSpawn = d + lerp(26, 18, diff);
     } else {
-      const l = irand(0, 2); addStreetObj(spawnBarrierObj('gate'), 'gate', l, d); addStreetObj(spawnBarrierObj('hurdle'), 'hurdle', (l + 1) % 3, d + 9); streetCoinArc((l + 1) % 3, d + 5);
-      street.nextSpawn = d + 24;
+      const l = irand(0, 2); addStreetObj(spawnBarrierObj('gate'), 'gate', l, d); addStreetObj(spawnBarrierObj('hurdle'), 'hurdle', (l + 1) % 3, d + 12);
+      street.nextSpawn = d + lerp(40, 26, diff);
     }
   }
 }
@@ -1270,11 +1271,11 @@ function streetCoin(lane, d, y) {
   if (!obj) { const g = new THREE.Group(); g.add(mesh(G.coin, M.coin, true, false)); g.add(mesh(G.coinFace, M.coin, false, false)); obstacleRoot.add(g); obj = { g }; }
   obj.g.visible = true; obj.type = 'coin'; obj.lane = lane; obj.d = d; obj.y = y;
   if (!placeOnPath(obj.g, d, lane)) { obj.g.visible = false; pools.coin.push(obj); return; }
-  obj.g.position.y += y; street.objs.push(obj);
+  obj.g.position.y += y; obj.g.scale.setScalar(STREET_COIN_SCALE); street.objs.push(obj);
 }
-function streetCoinLine(lane, d, n) { for (let i = 0; i < n; i++) streetCoin(lane, d + i * 1.7, 1.0); }
-function streetCoinArc(lane, d) { const ys = [1.0, 1.5, 1.95, 2.2, 1.95, 1.5, 1.0]; for (let i = 0; i < ys.length; i++) streetCoin(lane, d + i * 1.25, ys[i]); }
-function releaseStreetObj(o) { o.g.visible = false; if (o.type === 'coin') pools.coin.push(o); else pools.barrier[o.type].push(o); }
+function streetCoinLine(lane, d, n) { for (let i = 0; i < n; i++) streetCoin(lane, d + i * 2.0, 0.75); }
+function streetCoinArc(lane, d) { const ys = [0.75, 1.2, 1.6, 1.85, 1.6, 1.2, 0.75]; for (let i = 0; i < ys.length; i++) streetCoin(lane, d + i * 1.3, ys[i]); }
+function releaseStreetObj(o) { o.g.visible = false; o.g.scale.setScalar(1); if (o.type === 'coin') pools.coin.push(o); else pools.barrier[o.type].push(o); }
 function clearStreetObjs() { for (const o of street.objs) releaseStreetObj(o); street.objs.length = 0; }
 
 /* ---- driving: keep stepping to the next image; the viewer animates the camera between them */
@@ -1282,8 +1283,14 @@ function streetDrive() {
   if (!street.viewer || street.moving || street.ended || state.mode !== 'run') return;
   const next = street.index + 1;
   if (next >= street.ids.length) { streetWrap(); return; }
-  street.moving = true;
-  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; street.moving = false; faceDownRoad(img); }).catch(() => { street.moving = false; street.index = next; });
+  const target = 6.5 + clamp((street.s - street.runStart) / 700, 0, 1) * 4.5;      // m/s
+  const a = street.pos[street.ids[street.index]], b = street.pos[street.ids[next]];
+  const gap = (a && b && a.ll && b.ll) ? clamp(haversine(a.ll, b.ll), 3, 30) : 10;
+  const wait = Math.max(0, gap / target * 1000 - street.lastMoveDur);
+  if (performance.now() < street.lastMoveEnd + wait) return;
+  street.moving = true; const t0 = performance.now();
+  const done = () => { street.lastMoveDur = clamp(performance.now() - t0, 100, 3000); street.lastMoveEnd = performance.now(); street.moving = false; };
+  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; done(); faceDownRoad(img); }).catch(() => { street.index = next; done(); });
 }
 function streetWrap() {
   street.ended = true; $('fade').style.opacity = 1;
@@ -1365,7 +1372,7 @@ function streetUpdate(dt) {
   const ds = street.s - street.lastS; street.lastS = street.s;
   if (dt > 0) street.speed = lerp(street.speed, clamp(ds / dt, 0, 30), Math.min(1, dt * 5));
   if (state.mode === 'run') {
-    state.score += Math.max(0, ds) * 1.5;
+    state.score += Math.max(0, ds);
     if (street.nextSpawn < street.s + 20) street.nextSpawn = street.s + 24;
     streetSpawn();
   }
@@ -1514,7 +1521,7 @@ async function startRun() {
 }
 function beginRun() {
   audioInit(); resetWorld(); state.mode = 'run';
-  if (street.active) { clearStreetObjs(); street.nextSpawn = street.s + 60; street.ended = false; }
+  if (street.active) { clearStreetObjs(); street.runStart = street.s; street.nextSpawn = street.s + 120; street.ended = false; }
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
   $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
