@@ -1066,8 +1066,9 @@ function setView(v) {
    drawn with the viewer's own camera every frame (custom renderer), so
    they share its perspective, lens and motion.
    ============================================================ */
-const STREET_LANE_SHIFT = 1.75, STREET_COIN_SCALE = 0.72;
-const street = { active: false, runStart: 0, lastMoveEnd: 0, lastMoveDur: 800, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
+const STREET_LANE_OFF = [0, 1.75, 3.5], STREET_COIN_SCALE = 0.72, STREET_FOV = 62;   // lanes: camera track (left lane), centre line, right lane
+const laneEyeX = () => ((player.x + 2.6) / 5.2) * 3.5;
+const street = { active: false, runStart: 0, lastMoveEnd: 0, lastMoveDur: 800, heading: null, camActive: false, camFn: null, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
 const streetEl = $('street');
 function loadScript(url) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = url; el.onload = res; el.onerror = () => rej(new Error('script ' + url)); document.head.appendChild(el); }); }
 function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
@@ -1152,6 +1153,8 @@ function buildPath() {
     pts.push({ e: enu[0], n: enu[1], u: enu[2], s: 0, idx: i });
   }
   for (let i = 1; i < pts.length; i++) pts[i].s = pts[i - 1].s + Math.hypot(pts[i].e - pts[i - 1].e, pts[i].n - pts[i - 1].n);
+  for (let i = 0; i < pts.length; i++) { let sum = 0, k = 0; for (let j = Math.max(0, i - 4); j <= Math.min(pts.length - 1, i + 4); j++) { sum += pts[j].u; k++; } pts[i].us = sum / k; }
+  for (const pt of pts) pt.u = pt.us;
   street.path = pts;
   buildRibbon();
 }
@@ -1179,7 +1182,7 @@ function projectToPath(e, n) {
 function toChild(e, n, u) { return new THREE.Vector3(e, u, -n); }
 function placeOnPath(g, d, lane) {
   const q = pathAt(d); if (!q) return false;
-  const L = LANE_X[lane] + STREET_LANE_SHIFT, e = q.e + L * Math.cos(q.th), n = q.n - L * Math.sin(q.th);
+  const L = STREET_LANE_OFF[lane], e = q.e + L * Math.cos(q.th), n = q.n - L * Math.sin(q.th);
   g.position.copy(toChild(e, n, q.u - street.camH)); g.rotation.set(0, -q.th, 0);
   return true;
 }
@@ -1228,10 +1231,7 @@ function makeStreetRenderer() {
       r.setSize(c.width, c.height, false);
       T3.tmp.fromArray(viewMatrix).invert();
       T3.camPos.setFromMatrixPosition(T3.tmp);
-      street.s = projectToPath(T3.camPos.x, T3.camPos.y);
-      // lane change, jump and roll move the eye, not the photo
-      T3.off.makeTranslation(player.x + STREET_LANE_SHIFT, player.y - (player.rolling > 0 ? 0.55 : 0) + Math.sin(player.runPhase * 2) * 0.025, 0);
-      T3.tmp.multiply(T3.off);
+      if (!street.camActive) street.s = projectToPath(T3.camPos.x, T3.camPos.y);
       T3.camera.matrix.copy(T3.tmp); T3.camera.updateMatrixWorld(true);
       T3.camera.projectionMatrix.fromArray(projectionMatrix); T3.camera.projectionMatrixInverse.copy(T3.camera.projectionMatrix).invert();
       // sun follows the eye (in the child frame: x east, y up, -z north)
@@ -1242,6 +1242,46 @@ function makeStreetRenderer() {
   };
 }
 let v0 = null; // current viewer (for the renderer closure)
+
+/* ---- custom camera controls: we fly the camera along the road; the viewer blends imagery underneath */
+function streetCameraWorld() {
+  const q = pathAt(street.s); if (!q) return null;
+  if (street.heading === null) street.heading = q.th;
+  let d = q.th - street.heading; d = Math.atan2(Math.sin(d), Math.cos(d)); street.heading += d * 0.08;
+  const th = street.heading, rx = Math.cos(th), rn = -Math.sin(th), fx = Math.sin(th), fn = Math.cos(th);
+  const eye = laneEyeX(), bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.03 : 0;
+  const dip = player.rolling > 0 ? 0.6 : 0;
+  let up = player.y - dip + bob, pitch = clamp(player.vy * 0.01, -0.08, 0.08) - (player.rolling > 0 ? 0.18 : 0);
+  let roll = (LANE_X[player.lane] - player.x) * -0.05;
+  if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); up = lerp(up, -0.9, t); pitch = lerp(pitch, 0.7, t); roll += t * 0.8; }
+  const pos = new THREE.Vector3(q.e + rx * eye, q.n + rn * eye, q.u + up);
+  const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(rx, rn, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-fx, -fn, 0));
+  const rot = new THREE.Matrix4().makeRotationX(pitch).premultiply(new THREE.Matrix4().makeRotationZ(roll));
+  m.multiply(rot); m.setPosition(pos);
+  return m;
+}
+function makeCameraControls() {
+  const C = { viewCb: null, projCb: null, last: 0 };
+  const pushProjection = () => { if (!C.projCb || !street.viewer) return; const c = street.viewer.getCanvas(); const cam = new THREE.PerspectiveCamera(STREET_FOV, c.width / Math.max(1, c.height), 0.2, 900); C.projCb(cam.projectionMatrix.toArray()); };
+  const pushView = () => { const m = streetCameraWorld(); if (m && C.viewCb) C.viewCb(m.invert().toArray()); };
+  return {
+    onAttach(v, viewCb, projCb) { C.viewCb = viewCb; C.projCb = projCb; },
+    onActivate(v, viewMatrix, projectionMatrix, reference) { street.ref = reference; buildPath(); street.camActive = true; C.last = performance.now(); pushProjection(); pushView(); },
+    onAnimationFrame() {
+      const now = performance.now(), dt = clamp((now - C.last) / 1000, 0, 0.1); C.last = now;
+      if (state.mode === 'run' && !street.ended && street.path.length > 1) {
+        const target = 6.5 + clamp((street.s - street.runStart) / 700, 0, 1) * 4.5;
+        street.speed = lerp(street.speed || target, target, Math.min(1, dt * 2));
+        street.s = Math.min(street.s + street.speed * dt, pathLength());
+        if (street.s >= pathLength() - 2) streetWrap();
+      }
+      pushView();
+    },
+    onDeactivate() { street.camActive = false; }, onDetach() { street.camActive = false; },
+    onReference(v, reference) { street.ref = reference; buildPath(); for (const o of street.objs) placeOnPath(o.g, o.d, o.lane); },
+    onResize() { pushProjection(); },
+  };
+}
 
 /* ---- street obstacles: static objects along the path */
 function streetSpawn() {
@@ -1281,22 +1321,19 @@ function clearStreetObjs() { for (const o of street.objs) releaseStreetObj(o); s
 /* ---- driving: keep stepping to the next image; the viewer animates the camera between them */
 function streetDrive() {
   if (!street.viewer || street.moving || street.ended || state.mode !== 'run') return;
-  const next = street.index + 1;
-  if (next >= street.ids.length) { streetWrap(); return; }
-  const target = 6.5 + clamp((street.s - street.runStart) / 700, 0, 1) * 4.5;      // m/s
-  const a = street.pos[street.ids[street.index]], b = street.pos[street.ids[next]];
-  const gap = (a && b && a.ll && b.ll) ? clamp(haversine(a.ll, b.ll), 3, 30) : 10;
-  const wait = Math.max(0, gap / target * 1000 - street.lastMoveDur);
-  if (performance.now() < street.lastMoveEnd + wait) return;
-  street.moving = true; const t0 = performance.now();
-  const done = () => { street.lastMoveDur = clamp(performance.now() - t0, 100, 3000); street.lastMoveEnd = performance.now(); street.moving = false; };
-  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; done(); faceDownRoad(img); }).catch(() => { street.index = next; done(); });
+  const P = street.path; if (P.length < 2) return;
+  let j = street.segHint; while (j + 1 < P.length && P[j + 1].s <= street.s) j++; while (j > 0 && P[j].s > street.s) j--; street.segHint = j;
+  const want = P[j].idx;
+  if (want > street.index) {
+    street.moving = true;
+    street.viewer.moveTo(street.ids[want]).then((img) => { street.index = want; street.moving = false; faceDownRoad(img); }).catch(() => { street.index = want; street.moving = false; });
+  }
 }
 function streetWrap() {
   street.ended = true; $('fade').style.opacity = 1;
   setTimeout(() => {
-    clearStreetObjs(); street.index = 0; street.segHint = 0;
-    street.viewer.moveTo(street.ids[0]).then(() => { street.ended = false; street.moving = false; street.nextSpawn = street.s + 30; $('fade').style.opacity = 0; }).catch(() => { street.ended = false; $('fade').style.opacity = 0; });
+    clearStreetObjs(); street.index = 0; street.segHint = 0; street.s = 0; street.heading = null; street.runStart = 0;
+    street.viewer.moveTo(street.ids[0]).then(() => { street.ended = false; street.moving = false; street.nextSpawn = 60; $('fade').style.opacity = 0; }).catch(() => { street.ended = false; street.moving = false; $('fade').style.opacity = 0; });
   }, 350);
 }
 function faceDownRoad(img) {
@@ -1332,7 +1369,7 @@ async function startStreet(place) {
   });
   v0 = viewer;
   street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.pano = start.pano; street.camH = start.pano ? 2.2 : 1.45;
-  street.moving = false; street.ended = false; street.s = 0; street.lastS = 0; street.speed = 0; street.segHint = 0; street.path = [];
+  street.moving = false; street.ended = false; street.s = 0; street.lastS = 0; street.speed = 0; street.segHint = 0; street.path = []; street.heading = null; street.camActive = false;
   viewer.on('image', (ev) => {
     const img = ev.image; if (!img) return;
     const ll = img.computedLngLat || img.lngLat;
@@ -1341,8 +1378,10 @@ async function startStreet(place) {
     faceDownRoad(img);
   });
   viewer.addCustomRenderer(makeStreetRenderer());
+  try { viewer.attachCustomCameraControls(makeCameraControls()); viewer.setCameraControls(window.mapillary.CameraControls.Custom); } catch (e) { console.warn('custom camera unavailable', e); }
   await new Promise((res) => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; viewer.on('load', fin); viewer.on('image', fin); setTimeout(fin, 6000); });
   if (!street.ref) { try { street.ref = await viewer.getReference(); buildPath(); } catch (e) { /* ignore */ } }
+  { const pt = street.path.find((q) => q.idx >= street.index); street.s = pt ? pt.s : 0; street.heading = null; street.segHint = 0; }
   try { viewer.setCenter([0.5, 0.5]); } catch (e) { /* ignore */ }
   // hand the obstacle pool to the street scene
   street.three.wrap.add(obstacleRoot);
@@ -1551,6 +1590,7 @@ window.addEventListener('keydown', (e) => {
   if (state.mode === 'idle' && (k === ' ' || k === 'Enter')) { e.preventDefault(); startRun(); return; }
   if (state.mode === 'dead' && (k === ' ' || k === 'Enter') && $('dead').classList.contains('on')) { e.preventDefault(); startRun(); return; }
   if (k === 'v' || k === 'V') { setView(view === 'fp' ? 'tp' : 'fp'); return; }
+  if (street.active && (k === '[' || k === ']')) { street.camH = clamp(street.camH + (k === ']' ? 0.1 : -0.1), 0.6, 3.5); for (const o of street.objs) { placeOnPath(o.g, o.d, o.lane); if (o.type === 'coin') { o.g.position.y += o.y; o.g.scale.setScalar(STREET_COIN_SCALE); } } buildRibbon(); $('q').textContent = 'STREET · GROUND ' + street.camH.toFixed(1) + ' M BELOW CAMERA ( [ ] )'; return; }
   if (k === 'ArrowLeft' || k === 'a' || k === 'A') { e.preventDefault(); doLeft(); }
   else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); doRight(); }
   else if (k === 'ArrowUp' || k === 'w' || k === 'W' || k === ' ') { e.preventDefault(); doJump(); }
