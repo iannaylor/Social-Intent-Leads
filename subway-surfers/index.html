@@ -8,7 +8,7 @@
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
 // pasted here for hosted builds, or entered on the start card / passed as ?mly=TOKEN.
-window.INDI_CONFIG = { mapillaryToken: '' };
+window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa58a2207fd4e2323' };
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -1069,9 +1069,10 @@ function loadScript(url) { return new Promise((res, rej) => { const el = documen
 function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
 function streetToken() {
   const q = new URLSearchParams(location.search).get('mly'); if (q) return q;
+  if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) return window.INDI_CONFIG.mapillaryToken;
   const v = ($('mly').value || '').trim(); if (v) return v;
   try { const l = localStorage.getItem('indiswipeout.mly'); if (l) return l; } catch (e) { /* ignore */ }
-  return (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || '';
+  return '';
 }
 async function geocode(q) {
   const pc = q.replace(/\s+/g, '').toUpperCase();
@@ -1577,6 +1578,7 @@ async function boot() {
   resetWorld();
   window.addEventListener('resize', onResize);
   try { const t = localStorage.getItem('indiswipeout.mly') || (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || ''; if (t) $('mly').value = t; } catch (e) { /* ignore */ }
+  if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) { $('mly').value = window.INDI_CONFIG.mapillaryToken; $('mly').parentElement.style.display = 'none'; setStreetStatus('Runs through real street-level photos of the place you choose. Type a postcode or address, or use MY LOCATION.'); }
   const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) { $('pc').value = qm.get('pc'); $('streetOn').checked = true; $('streetBox').classList.add('on'); }
   setProgress(1, 'READY');
   $('loading').classList.add('off'); $('start').classList.add('on');
