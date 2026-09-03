@@ -8,7 +8,7 @@
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
 // pasted here for hosted builds, or entered on the start card / passed as ?mly=TOKEN.
-window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa58a2207fd4e2323' };
+window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa58a2207fd4e2323', googleKey: 'AIzaSyCWdznf57gsN7Ej_-rdgvCMkrQbbuvuYKo' };
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -1152,7 +1152,7 @@ function setView(v) {
    every few hundred metres.
    ============================================================ */
 const STREET_COIN_SCALE = 0.8;
-const street = { active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0 };
+const street = { active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
 const streetEl = $('street');
 function streetToken() {
   const q = new URLSearchParams(location.search).get('mly'); if (q) return q;
@@ -1203,6 +1203,61 @@ async function findPanos(lat, lon, token) {
   }
   result.log = log; return result;
 }
+/* ---- Google Street View: five 90-degree views make a box around the player ---- */
+const GKEY = () => (window.INDI_CONFIG && window.INDI_CONFIG.googleKey) || new URLSearchParams(location.search).get('gkey') || '';
+async function gsvMeta(lat, lng, radius) {
+  const r = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat.toFixed(6)},${lng.toFixed(6)}&radius=${radius}&source=outdoor&key=${encodeURIComponent(GKEY())}`);
+  const j = await r.json();
+  if (j.status !== 'OK') { if (j.status && j.status !== 'ZERO_RESULTS') throw new Error('Street View: ' + j.status + (j.error_message ? ' (' + j.error_message + ')' : '')); return null; }
+  return j;
+}
+const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
+async function gsvFind(lat, lng) {
+  const base = await gsvMeta(lat, lng, 500); if (!base) return null;
+  const L = { lat: base.location.lat, lng: base.location.lng };
+  const probes = await Promise.all([[45, 0], [0, 45], [-45, 0], [0, -45]].map(([n, e]) => { const q = moveLL(L.lat, L.lng, n, e); return gsvMeta(q.lat, q.lng, 30).catch(() => null); }));
+  let best = null, bd = 0;
+  for (const p of probes) if (p && p.pano_id !== base.pano_id) { const d = haversine(L, { lat: p.location.lat, lng: p.location.lng }); if (d > bd) { bd = d; best = p; } }
+  const heading = best ? bearing(L, { lat: best.location.lat, lng: best.location.lng }) : 0;
+  return { pano: base.pano_id, lat: L.lat, lng: L.lng, heading, date: base.date || '' };
+}
+async function gsvNext(cur) {
+  for (let step = 70; step <= 280; step += 70) {
+    const q = moveLL(cur.lat, cur.lng, Math.cos(cur.heading * Math.PI / 180) * step, Math.sin(cur.heading * Math.PI / 180) * step);
+    const m = await gsvMeta(q.lat, q.lng, 45).catch(() => null);
+    if (m && m.pano_id !== cur.pano) { const L = { lat: m.location.lat, lng: m.location.lng }; return { pano: m.pano_id, lat: L.lat, lng: L.lng, heading: bearing({ lat: cur.lat, lng: cur.lng }, L), date: m.date || '' }; }
+  }
+  return null;
+}
+const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/streetview?size=640x640&pano=${encodeURIComponent(pano)}&heading=${((heading % 360) + 360) % 360}&pitch=${pitch}&fov=90&key=${encodeURIComponent(GKEY())}`;
+function loadTex(url) {
+  return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('image blocked'))); });
+}
+function makeBox() {
+  const g = new THREE.Group(), d = 100, geo = new THREE.PlaneGeometry(2 * d, 2 * d);
+  const mk = () => new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 1, depthWrite: false }));
+  const ahead = mk(); ahead.position.z = -d;                                  // faces +z (toward the eye)
+  const right = mk(); right.position.x = d; right.rotation.y = -Math.PI / 2;
+  const behind = mk(); behind.position.z = d; behind.rotation.y = Math.PI;
+  const left = mk(); left.position.x = -d; left.rotation.y = Math.PI / 2;
+  const up = mk(); up.position.y = d; up.rotation.x = Math.PI / 2;          // image top edge = behind
+  const down = mk(); down.position.y = -d; down.rotation.x = -Math.PI / 2; down.material.color.setHex(0x3a3a3a);
+  for (const m of [ahead, right, behind, left, up, down]) { m.renderOrder = -10; m.frustumCulled = false; g.add(m); }
+  g.userData.faces = { ahead, right, behind, left, up, down }; g.visible = false; scene.add(g); return g;
+}
+function setBoxOpacity(g, o) { for (const m of g.children) m.material.opacity = o; }
+async function gsvShow(cur, instant) {
+  const f = street.boxB.userData.faces, H = cur.heading;
+  const [ta, tr, tb, tl, tu] = await Promise.all([loadTex(gsvUrl(cur.pano, H, 0)), loadTex(gsvUrl(cur.pano, H + 90, 0)), loadTex(gsvUrl(cur.pano, H + 180, 0)), loadTex(gsvUrl(cur.pano, H + 270, 0)), loadTex(gsvUrl(cur.pano, H, 90))]);
+  if (!street.active) return;
+  const put = (m, t) => { m.material.map = t; m.material.needsUpdate = true; };
+  put(f.ahead, ta); put(f.right, tr); put(f.behind, tb); put(f.left, tl); put(f.up, tu);
+  const to = street.boxB, from = street.box;
+  to.visible = true; setBoxOpacity(to, instant ? 1 : 0); street.fade = instant ? 1 : 0.0001;
+  if (instant) { from.visible = false; street.box = to; street.boxB = from; }
+  street.gsv = cur;
+  $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · GOOGLE STREET VIEW' + (cur.date ? ' ' + cur.date : '');
+}
 function loadPanoTexture(im) {
   if (street.cache[im.id]) return street.cache[im.id];
   const pr = new Promise((res, rej) => {
@@ -1239,21 +1294,35 @@ async function showPano(idx, instant) {
 async function startStreet(place) {
   const token = streetToken();
   setStreetStatus('Finding 360° photos near ' + (place.name || 'you') + '…');
-  let panos = [];
-  try { if (token) panos = await findPanos(place.lat, place.lon, token); else setStreetStatus('No Mapillary token configured.', true); } catch (e) { setStreetStatus(e.message, true); }
   if (!street.sky) { street.sky = makeSky(); street.skyB = makeSky(); }
-  street.place = place; street.panos = panos; street.panoIdx = -1; street.plainSky = panos.length === 0;
+  if (!street.box) { street.box = makeBox(); street.boxB = makeBox(); }
+  street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = '';
+  street.sky.visible = false; street.skyB.visible = false; street.box.visible = false; street.boxB.visible = false;
   street.active = true;
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
   applyStreetLighting(true);
-  if (panos.length) { await showPano(0, true); street.nextSwapD = 260; const far = panos.distanceKm > 1.5 ? ' The nearest 360° coverage is ' + panos.distanceKm.toFixed(1) + ' km away, so the surroundings come from there.' : ''; setStreetStatus('Found ' + panos.length + ' 360° photos.' + far + ' Run!'); }
-  else { street.sky.visible = false; street.skyB.visible = false; setStreetStatus('No 360° photos found within 20 km, running with a plain sky. Lookup detail: ' + ((panos.log || []).join(' · ') || 'no searches ran') + '.', true); }
-  $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + (panos.length ? '' : ' · PLAIN SKY');
+  let gerr = '';
+  if (GKEY()) {
+    try {
+      setStreetStatus('Finding Google Street View near ' + (place.name || 'you') + '…');
+      const cur = await gsvFind(place.lat, place.lon);
+      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = 260; setStreetStatus('Street View found. Run!'); }
+      else gerr = 'No Street View within 500 m.';
+    } catch (e) { gerr = e.message; }
+  }
+  if (street.source !== 'google') {
+    let panos = [];
+    try { if (token) panos = await findPanos(place.lat, place.lon, token); } catch (e) { gerr += ' ' + e.message; }
+    street.panos = panos;
+    if (panos.length) { await showPano(0, true); street.source = 'mapillary'; street.nextSwapD = 260; setStreetStatus((gerr ? gerr + ' ' : '') + 'Using ' + panos.length + ' Mapillary 360° photos' + (panos.distanceKm > 1.5 ? ' from ' + panos.distanceKm.toFixed(1) + ' km away' : '') + '. Run!', !!gerr); }
+    else { street.plainSky = true; setStreetStatus((gerr ? gerr + ' ' : '') + 'No street imagery found, running with a plain sky.', true); $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + ' · PLAIN SKY'; }
+  }
 }
 function stopStreet() {
   if (!street.active) return;
   street.active = false; street.place = null; street.panos = [];
   if (street.sky) { street.sky.visible = false; street.skyB.visible = false; }
+  if (street.box) { street.box.visible = false; street.boxB.visible = false; }
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
   applyStreetLighting(false);
   $('q').textContent = QUALITY === 'high' ? 'AO · BLOOM · HDR' : 'MOBILE PRESET';
@@ -1275,14 +1344,18 @@ function streetUpdate(dt) {
   if (!street.active) return;
   // sky follows the eye so it reads as infinitely far
   if (street.sky) { street.sky.position.set(camera.position.x, camera.position.y - 1.2, camera.position.z); street.skyB.position.copy(street.sky.position); }
+  if (street.box) { street.box.position.set(camera.position.x, camera.position.y - 0.9, camera.position.z); street.boxB.position.copy(street.box.position); }
   if (street.fade > 0 && street.fade < 1) {
     street.fade = Math.min(1, street.fade + dt / 1.6);
-    street.skyB.material.opacity = street.fade;
-    if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; }
+    if (street.source === 'google') { setBoxOpacity(street.boxB, street.fade); if (street.fade >= 1) { const t = street.box; street.box.visible = false; street.box = street.boxB; street.boxB = t; setBoxOpacity(street.boxB, 0); } }
+    else { street.skyB.material.opacity = street.fade; if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; } }
   }
-  if (state.mode === 'run' && street.panos.length > 1 && state.traveled - street.runStart > street.nextSwapD && street.fade >= 1 && !street.loading) {
+  if (state.mode === 'run' && state.traveled - street.runStart > street.nextSwapD && street.fade >= 1 && !street.loading) {
     street.nextSwapD += 260;
-    showPano((street.panoIdx + 1) % street.panos.length, false);
+    if (street.source === 'google' && street.gsv) {
+      street.loading = true;
+      gsvNext(street.gsv).then((nxt) => { if (nxt && street.active) return gsvShow(nxt, false); }).catch(() => {}).finally(() => { street.loading = false; });
+    } else if (street.panos.length > 1) showPano((street.panoIdx + 1) % street.panos.length, false);
   }
   for (const pl of lights.lampLights) pl.intensity = 0;
 }

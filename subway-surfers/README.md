@@ -21,13 +21,17 @@ loaded.
 Tick **STREET MODE** on the start card, type a postcode or address (or press
 MY LOCATION), and the run moves from the tunnel onto a real 3D street: tarmac
 with markings, kerbs, pavements, garden walls and hedges, lamp posts, bins and
-parked cars as lane blockers. Around it, 360° photos of the chosen area from
-[Mapillary](https://www.mapillary.com) form the sky and skyline, turned to face
-down the road and cross-faded to the next photo every 260 m. Places with no
-360° coverage run with a plain sky and say so.
+parked cars as lane blockers. Around it, real photos of the chosen area form the
+sky and skyline: Google Street View is used first (five Street View Static API
+views of the nearest panorama, mapped onto a box around the camera, stepping to
+the next panorama along the road every 260 m with a cross-fade). If no Google
+key is configured, 360° photos from [Mapillary](https://www.mapillary.com) are
+used instead. Places with no coverage at all run with a plain sky and say so.
 
-The Mapillary client token is built into the page (`window.INDI_CONFIG`); a
-different one can be passed as `?mly=TOKEN`. Place lookup uses postcodes.io for
+The Google Maps key and the Mapillary client token are built into the page
+(`window.INDI_CONFIG`); different ones can be passed as `?gkey=KEY` and
+`?mly=TOKEN`. Restrict the Google key to the site's referrer and to the Street
+View Static API in the Google Cloud console. Place lookup uses postcodes.io for
 UK postcodes and Nominatim for anything else, so Street mode needs a hosted
 copy rather than the Claude artifact frame. `?pc=SW1A%201AA` pre-fills a place.
 

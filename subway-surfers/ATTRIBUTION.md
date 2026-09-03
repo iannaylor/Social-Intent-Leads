@@ -8,3 +8,10 @@
 
 Every other texture is generated procedurally at load time. Fonts are loaded from Google Fonts.
 Three.js r128 and its example passes are loaded from cdnjs and jsDelivr.
+
+# Street mode imagery
+
+Street mode fetches imagery at run time and does not embed it. Google Street View
+images come from the Street View Static API and are shown with the "Google Street
+View" credit in the corner label, subject to the Google Maps Platform terms. Mapillary
+360° photos are CC BY-SA 4.0 from their contributors and are credited the same way.
