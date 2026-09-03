@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Ballast Run</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EB%3C/text%3E%3C/svg%3E">
+<title>Indi’s Wipeout</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EI%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
@@ -71,8 +71,8 @@
 
 <div id="start" class="overlay">
   <div class="card">
-    <div class="bullet">B</div>
-    <h1>BALLAST RUN</h1>
+    <div class="bullet">I</div>
+    <h1>INDI’S WIPEOUT</h1>
     <div class="sub">DOWNTOWN · ALL STOPS</div>
     <ul class="rules">
       <li><b>◀ ▶ LANES</b>Swipe or arrow keys to change track.</li>
@@ -467,8 +467,8 @@ function buildTextures() {
     const W = 1024, H = 256, c = mkCanvas(W, H), g = c.getContext('2d');
     g.fillStyle = '#101214'; g.fillRect(0, 0, W, H); g.strokeStyle = '#3a3d41'; g.lineWidth = 10; g.strokeRect(10, 10, W - 20, H - 20);
     g.fillStyle = '#e8792b'; g.beginPath(); g.arc(140, 128, 76, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#111'; g.font = signFont(112); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('B', 140, 136);
-    g.fillStyle = '#f2eee6'; g.textAlign = 'left'; g.font = signFont(128); g.fillText('BALLAST ST', 256, 128);
+    g.fillStyle = '#111'; g.font = signFont(112); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('I', 140, 136);
+    g.fillStyle = '#f2eee6'; g.textAlign = 'left'; g.font = signFont(128); g.fillText('INDI ST', 256, 128);
     noiseFill(g, W, H, 256, 0.15); T.sign = tex(c, { srgb: true, clamp: true });
   }
   {
@@ -1020,7 +1020,7 @@ function setView(v) {
   if (v === 'tp' && !rig.model) v = 'fp';
   view = v; $('viewv').textContent = v === 'fp' ? 'FIRST PERSON' : 'CHASE CAM';
   runner.pivot.visible = v === 'tp' && !!rig.model;
-  try { localStorage.setItem('ballastrun.view', v); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('indiswipeout.view', v); } catch (e) { /* ignore */ }
 }
 
 /* ============================================================
@@ -1105,7 +1105,7 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
    ============================================================ */
 const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
-try { state.best = parseInt(localStorage.getItem('ballastrun.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
+try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
 window.ballastRun = state;
 window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
@@ -1138,7 +1138,7 @@ function die(cause) {
   if (state.mode !== 'run') return;
   state.mode = 'dead'; state.deathT = 0; state.hitFlash = 1; sfxHit();
   $('cause').textContent = cause;
-  if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('ballastrun.best', String(state.best)); } catch (e) { /* ignore */ } }
+  if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
   $('dScore').firstChild.textContent = String(Math.floor(state.score)); $('dCoins').firstChild.textContent = String(state.coins); $('dBest').firstChild.textContent = String(state.best);
   updateHUD();
   setTimeout(() => { if (state.mode === 'dead') $('dead').classList.add('on'); }, 900);
@@ -1391,7 +1391,7 @@ async function boot() {
   for (let i = 0; i < SEG_COUNT; i++) segments.push(buildSegment());
   runner = buildRunner(); dust = buildDust();
   attachRunnerModel(runnerGltf);
-  let savedView = 'fp'; try { savedView = localStorage.getItem('ballastrun.view') || 'fp'; } catch (e) { /* ignore */ }
+  let savedView = 'fp'; try { savedView = localStorage.getItem('indiswipeout.view') || 'fp'; } catch (e) { /* ignore */ }
   setView(savedView === 'tp' ? 'tp' : 'fp');
   buildPost();
   resetWorld();

@@ -1,4 +1,4 @@
-# Ballast Run
+# Indi’s Wipeout
 
 A photorealistic-styled, Subway Surfers-inspired endless runner that lives in a
 single HTML file. Open `index.html` in any modern browser (Chrome, Edge, Safari,
@@ -52,7 +52,7 @@ a lane instead of ending the run.
   bloom, a film grade pass (ACES, chromatic aberration, vignette, grain, hit
   flash) and FXAA.
 - Sections alternate between brick tunnel and a tiled station platform with
-  columns, benches, a vending machine and a "BALLAST ST" sign.
+  columns, benches, a vending machine and an "INDI ST" sign.
 
 ## Building
 
@@ -64,4 +64,4 @@ npm i @pmndrs/assets@1.7.0
 node tools/build.mjs
 ```
 
-Best score is kept in `localStorage` under `ballastrun.best`.
+Best score is kept in `localStorage` under `indiswipeout.best`.
