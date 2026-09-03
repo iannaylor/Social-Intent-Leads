@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Indi’s Wipeout</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EI%3C/text%3E%3C/svg%3E">
+<script>
+// Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
+// pasted here for hosted builds, or entered on the start card / passed as ?mly=TOKEN.
+window.INDI_CONFIG = { mapillaryToken: '' };
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
@@ -15,7 +20,8 @@
     --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
   }
   html,body{margin:0;height:100%;background:var(--ground);color:var(--ink);overflow:hidden;font-family:var(--mono);-webkit-user-select:none;user-select:none;touch-action:none}
-  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:1}
+  #hud,#best,#hint,#q,#view,.overlay,#loading,#err,#fade{z-index:2}
   #hud{position:fixed;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));display:flex;gap:10px;pointer-events:none;opacity:0;transition:opacity .4s}
   #hud.on{opacity:1}
   .plate{background:linear-gradient(180deg,#15181b,#0c0e10);border:1px solid var(--plate-edge);box-shadow:0 0 0 3px #060708,0 6px 18px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);padding:8px 14px 6px;min-width:120px}
@@ -29,14 +35,14 @@
   #view.on{opacity:1}
   #hint{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--ink-dim);opacity:0;transition:opacity .6s;pointer-events:none;text-shadow:0 2px 6px #000}
   #hint.on{opacity:.85}
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:16px 0;box-sizing:border-box;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
   .overlay.on{opacity:1;pointer-events:auto}
-  .card{width:min(92vw,420px);background:linear-gradient(180deg,#17191c,#0b0c0e);border:1px solid var(--plate-edge);box-shadow:0 0 0 4px #050607,0 30px 60px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.07);padding:28px 30px 26px;text-align:center;position:relative}
+  .card{width:min(92vw,420px);margin:auto;max-height:calc(100vh - 32px);overflow-y:auto;box-sizing:border-box;background:linear-gradient(180deg,#17191c,#0b0c0e);border:1px solid var(--plate-edge);box-shadow:0 0 0 4px #050607,0 30px 60px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.07);padding:28px 30px 26px;text-align:center;position:relative}
   .card::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:repeating-linear-gradient(90deg,var(--sodium) 0 24px,#1a1a1a 24px 30px)}
   .bullet{width:64px;height:64px;border-radius:50%;background:var(--sodium);color:#111;font-family:var(--display);font-size:44px;line-height:64px;margin:6px auto 12px;box-shadow:0 0 0 3px #0b0c0e,0 0 0 5px var(--sodium),0 0 28px rgba(232,121,43,.45)}
-  h1{font-family:var(--display);font-weight:400;font-size:56px;letter-spacing:.06em;margin:0;line-height:.95;text-wrap:balance}
+  h1{font-family:var(--display);font-weight:400;font-size:52px;letter-spacing:.06em;margin:0;line-height:.95;text-wrap:balance}
   .sub{font-family:var(--display);font-size:15px;letter-spacing:.22em;color:var(--ink-dim);margin:6px 0 18px}
-  .rules{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;text-align:left;margin:0 0 22px;padding:0;list-style:none;font-size:12px;line-height:1.35;color:#cfc9be}
+  .rules{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;text-align:left;margin:0 0 16px;padding:0;list-style:none;font-size:12px;line-height:1.35;color:#cfc9be}
   .rules li b{display:block;font-family:var(--display);font-size:15px;letter-spacing:.14em;color:var(--ink);font-weight:400}
   .stat{display:flex;justify-content:center;gap:28px;margin:4px 0 20px}
   .stat div{font-family:var(--mono);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -51,6 +57,24 @@
   #loading.off{opacity:0;pointer-events:none}
   #loading .bar{width:180px;height:3px;background:#1d2024;overflow:hidden}
   #loading .bar i{display:block;height:100%;width:0;background:var(--sodium);transition:width .3s}
+  #street{position:fixed;inset:0;display:none;background:#0b0c0e}
+  #street.on{display:block}
+  #street .mapillary-attribution-container{opacity:.7}
+  #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .25s}
+  .street{margin:0 0 20px;padding:12px 14px 10px;border:1px solid var(--plate-edge);background:#0d0f12;text-align:left}
+  .street .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .street label.t{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:16px;letter-spacing:.16em;cursor:pointer}
+  .street input[type=checkbox]{appearance:none;width:38px;height:20px;border-radius:10px;background:#2a2d31;position:relative;cursor:pointer;flex:none;margin:0}
+  .street input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#8d8880;transition:transform .15s,background .15s}
+  .street input[type=checkbox]:checked{background:#5b2f13}
+  .street input[type=checkbox]:checked::after{transform:translateX(18px);background:var(--sodium)}
+  .street input[type=text]{flex:1;min-width:0;font-family:var(--mono);font-size:13px;color:var(--ink);background:#15181b;border:1px solid var(--plate-edge);padding:7px 9px}
+  .street input[type=text]:focus{outline:2px solid var(--sodium);outline-offset:1px}
+  .street button.small{font-size:14px;padding:7px 12px 5px;letter-spacing:.12em;flex:none;box-shadow:0 2px 0 #6f6a61}
+  .street .note{font-size:11px;line-height:1.4;color:var(--ink-dim);margin-top:8px}
+  .street .note b{color:var(--sodium);font-weight:600}
+  .street .fields{display:none}
+  .street.on .fields{display:block}
   #err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-width:80vw;text-align:center;color:var(--ink);font-size:14px;line-height:1.5;display:none}
   #q{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:12px;letter-spacing:.2em;color:var(--ink-dim);opacity:.6;pointer-events:none}
   @media (max-width:520px){h1{font-size:44px}.plate{min-width:96px;padding:6px 10px 4px}.plate .val{font-size:20px}.rules{grid-template-columns:1fr}}
@@ -81,9 +105,19 @@
       <li><b>▶ TRAINS</b>Stopped cars are a roof. Moving cars are the end.</li>
       <li><b>◉ VIEW</b>First person. A rigged <code>runner.glb</code> beside the page unlocks the chase camera (V).</li>
     </ul>
+    <div class="street" id="streetBox">
+      <label class="t"><input type="checkbox" id="streetOn"> STREET MODE</label>
+      <div class="fields">
+        <div class="row"><input type="text" id="pc" placeholder="Postcode or address" autocomplete="postal-code"><button class="small" id="btnLoc" type="button">MY LOCATION</button></div>
+        <div class="row"><input type="text" id="mly" placeholder="Mapillary access token (MLY|…)"></div>
+        <div class="note" id="streetNote">Runs through real street-level photos of the place you choose. Needs a free Mapillary token from <b>mapillary.com/developer</b>, and works in the standalone file or a hosted copy, not inside the Claude artifact frame.</div>
+      </div>
+    </div>
     <button id="btnStart">START RUN</button>
   </div>
 </div>
+<div id="street"></div>
+<div id="fade"></div>
 
 <div id="dead" class="overlay">
   <div class="card">
@@ -95,6 +129,7 @@
       <div id="dBest">0<span>BEST</span></div>
     </div>
     <button id="btnAgain">RUN AGAIN</button>
+    <div style="margin-top:12px"><button id="btnMenu" class="small" style="font-size:14px;padding:7px 14px 5px;letter-spacing:.14em;background:#2a2d31;color:var(--ink);box-shadow:0 2px 0 #060708">MENU · STREET MODE</button></div>
   </div>
 </div>
 
@@ -130,7 +165,8 @@ const VAULT_RX = 6.6, VAULT_RY = 4.3, VAULT_CY = 1.3;          // elliptical vau
 const WALL_X = VAULT_RX;
 const GRAVITY = 27, JUMP_V = 9.9;
 const ROLL_TIME = 0.72;
-const START_SPEED = 13, MAX_SPEED = 31, ACCEL = 0.24;
+const TUNNEL_SPEED = { start: 13, max: 31, accel: 0.24 }, STREET_SPEED = { start: 9, max: 19, accel: 0.14 };
+let SPEEDS = TUNNEL_SPEED, START_SPEED = SPEEDS.start, MAX_SPEED = SPEEDS.max, ACCEL = SPEEDS.accel;
 const TRAIN_W = 2.4, TRAIN_BODY_H = 2.6, TRAIN_LIFT = 0.6, TRAIN_TOP = TRAIN_LIFT + TRAIN_BODY_H; // 3.2
 const RAMP_LEN = 7.5;
 const SPAWN_AHEAD = 170;
@@ -152,7 +188,7 @@ if (!window.THREE || !THREE.EffectComposer || !THREE.SSAOPass || !THREE.RoundedB
 const canvas = $('c');
 canvas.tabIndex = 0; canvas.style.outline = 'none';
 let renderer;
-try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }); }
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'high-performance' }); }
 catch (e) { fail('WebGL is not available in this browser.'); return; }
 const isWebGL2 = renderer.capabilities.isWebGL2;
 const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
@@ -577,7 +613,7 @@ function buildEnvironment(hdri) {
   scene.environment = envTex;
   pmrem.dispose();
 
-  scene.add(new THREE.HemisphereLight(0x3a4250, 0x171311, 0.13));
+  const hemi = new THREE.HemisphereLight(0x3a4250, 0x171311, 0.13); scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffdcb4, 0.55);
   key.position.set(4, 12, -9); key.target.position.set(0, 0, -2);
   key.castShadow = true;
@@ -590,7 +626,7 @@ function buildEnvironment(hdri) {
   const lampLights = [];
   for (let i = 0; i < 5; i++) { const pl = new THREE.PointLight(0xff9a3a, 0, 24, 1.7); scene.add(pl); lampLights.push(pl); }
   const headLight = new THREE.PointLight(0xfff0cc, 0, 28, 1.6); scene.add(headLight);
-  return { key, lampLights, headLight };
+  return { key, hemi, lampLights, headLight };
 }
 
 /* ============================================================
@@ -895,7 +931,8 @@ function coinArc(lane, d) { const ys = [1.0, 1.5, 1.95, 2.2, 1.95, 1.5, 1.0]; fo
 function laneHasTrain(lane) { return trains.some((t) => t.lane === lane); }
 
 function spawnBand(d, difficulty) {
-  const r = Math.random(), lanes = [0, 1, 2], shuffled = lanes.slice().sort(() => Math.random() - 0.5);
+  let r = Math.random(); const lanes = [0, 1, 2], shuffled = lanes.slice().sort(() => Math.random() - 0.5);
+  if (street.active) r = r < 0.7 ? 0.5 : 0.95;   // barrier rows and coin sweeps only
   if (r < 0.34) {
     const n = Math.random() < 0.55 + difficulty * 0.2 ? 2 : 1; let maxLen = 0; const used = [];
     for (let i = 0; i < n; i++) {
@@ -1024,6 +1061,123 @@ function setView(v) {
 }
 
 /* ============================================================
+   Street mode: run through Mapillary street-level imagery
+   ============================================================ */
+const street = { active: false, viewer: null, ids: [], index: 0, spacing: 8, lastHopD: 0, moving: false, lastLngLat: null, fov: 0, ground: null, saved: null };
+const streetEl = $('street');
+function loadScript(url) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = url; el.onload = res; el.onerror = () => rej(new Error('script ' + url)); document.head.appendChild(el); }); }
+function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
+function streetToken() {
+  const q = new URLSearchParams(location.search).get('mly'); if (q) return q;
+  const v = ($('mly').value || '').trim(); if (v) return v;
+  try { const l = localStorage.getItem('indiswipeout.mly'); if (l) return l; } catch (e) { /* ignore */ }
+  return (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || '';
+}
+async function geocode(q) {
+  const pc = q.replace(/\s+/g, '').toUpperCase();
+  if (/^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/.test(pc)) {
+    const r = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(pc)); const j = await r.json();
+    if (j && j.result) return { lat: j.result.latitude, lon: j.result.longitude, name: j.result.admin_district || pc };
+  }
+  const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q)); const j = await r.json();
+  if (j && j[0]) return { lat: +j[0].lat, lon: +j[0].lon, name: (j[0].display_name || q).split(',')[0] };
+  throw new Error('Could not find that place.');
+}
+function haversine(a, b) { const R = 6371000, dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lng - a.lng) * Math.PI / 180; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
+async function findStart(lat, lon, token) {
+  for (const half of [0.003, 0.008, 0.02]) {
+    const bbox = [lon - half, lat - half, lon + half, lat + half].join(',');
+    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,computed_geometry,sequence,captured_at,is_pano&bbox=${bbox}&limit=200`);
+    if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Mapillary rejected the token.' : 'Mapillary search failed (' + r.status + ').');
+    const j = await r.json(); const imgs = (j.data || []).filter((i) => i.sequence && i.computed_geometry);
+    if (!imgs.length) continue;
+    imgs.sort((a, b) => haversine({ lat, lng: lon }, { lat: a.computed_geometry.coordinates[1], lng: a.computed_geometry.coordinates[0] }) - haversine({ lat, lng: lon }, { lat: b.computed_geometry.coordinates[1], lng: b.computed_geometry.coordinates[0] }));
+    // prefer a sequence with plenty of images ahead
+    for (const img of imgs.slice(0, 6)) {
+      const rs = await fetch(`https://graph.mapillary.com/image_ids?access_token=${encodeURIComponent(token)}&sequence_id=${encodeURIComponent(img.sequence)}`);
+      if (!rs.ok) continue;
+      const js = await rs.json(); const ids = (js.data || []).map((x) => x.id);
+      const idx = ids.indexOf(img.id);
+      if (ids.length >= 8 && idx >= 0) return { ids: ids.length - idx >= 8 ? ids : ids.slice().reverse(), index: ids.length - idx >= 8 ? idx : ids.length - 1 - idx };
+    }
+  }
+  throw new Error('No street imagery near there. Try a busier road.');
+}
+function setStreetStatus(msg, bad) { const n = $('streetNote'); n.innerHTML = msg; n.style.color = bad ? '#e0705f' : ''; }
+async function startStreet(place) {
+  const token = streetToken();
+  if (!token) throw new Error('Enter a Mapillary access token first.');
+  try { localStorage.setItem('indiswipeout.mly', token); } catch (e) { /* ignore */ }
+  setStreetStatus('Finding street imagery near ' + (place.name || 'you') + '…');
+  const start = await findStart(place.lat, place.lon, token);
+  if (!window.mapillary) {
+    setStreetStatus('Loading the street viewer…');
+    loadCss('https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css');
+    await loadScript('https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.js');
+  }
+  stopStreet();
+  streetEl.classList.add('on'); streetEl.innerHTML = '';
+  const viewer = new window.mapillary.Viewer({
+    accessToken: token, container: streetEl, imageId: start.ids[start.index], trackResize: true,
+    component: { cover: false, direction: false, sequence: false, zoom: false, bearing: false, keyboard: false, pointer: false, attribution: true, cache: true, spatial: false },
+  });
+  street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.lastLngLat = null; street.spacing = 8; street.moving = false; street.lastHopD = 0;
+  viewer.on('image', (ev) => {
+    const img = ev.image; if (!img) return;
+    const ll = img.computedLngLat || img.lngLat;
+    if (ll && street.lastLngLat) { const d = haversine(street.lastLngLat, ll); if (d > 1) street.spacing = clamp(d, 3, 25); }
+    if (ll) street.lastLngLat = ll;
+    const i = street.ids.indexOf(img.id); if (i >= 0) street.index = i;
+  });
+  viewer.on('fov', () => viewer.getFieldOfView().then((f) => { street.fov = f; }).catch(() => {}));
+  await new Promise((res) => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; viewer.on('load', fin); viewer.on('image', fin); setTimeout(fin, 6000); });
+  try { viewer.setCenter([0.5, 0.5]); } catch (e) { /* ignore */ }
+  try { street.fov = await viewer.getFieldOfView(); } catch (e) { street.fov = 0; }
+  // scene: hide the tunnel, daylight, transparent clear, built-in tone mapping
+  street.saved = { fog: scene.fog, bg: scene.background, key: lights.key.intensity, keyCol: lights.key.color.getHex(), hemi: lights.hemi.intensity, tm: renderer.toneMapping, enc: renderer.outputEncoding };
+  scene.fog = null; scene.background = null;
+  for (const sg of segments) sg.root.visible = false;
+  dust.pts.visible = false;
+  lights.key.intensity = 1.7; lights.key.color.setHex(0xfff2dc); lights.hemi.intensity = 0.6; lights.hemi.color.setHex(0xbfd4ff); lights.hemi.groundColor.setHex(0x6a6258);
+  if (!street.ground) { street.ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 260), new THREE.ShadowMaterial({ opacity: 0.38 })); street.ground.rotation.x = -Math.PI / 2; street.ground.position.z = -100; street.ground.receiveShadow = true; scene.add(street.ground); }
+  street.ground.visible = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0; renderer.outputEncoding = THREE.sRGBEncoding; renderer.setClearColor(0x000000, 0);
+  scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  street.active = true; SPEEDS = STREET_SPEED; START_SPEED = SPEEDS.start; MAX_SPEED = SPEEDS.max; ACCEL = SPEEDS.accel;
+  $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase();
+  setStreetStatus('Street imagery loaded. Run!');
+}
+function stopStreet() {
+  if (street.viewer) { try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; }
+  streetEl.classList.remove('on'); streetEl.innerHTML = '';
+  if (street.active && street.saved) {
+    scene.fog = street.saved.fog; scene.background = street.saved.bg;
+    for (const sg of segments) sg.root.visible = true; dust.pts.visible = true;
+    lights.key.intensity = street.saved.key; lights.key.color.setHex(street.saved.keyCol); lights.hemi.intensity = street.saved.hemi; lights.hemi.color.setHex(0x3a4250); lights.hemi.groundColor.setHex(0x171311);
+    if (street.ground) street.ground.visible = false;
+    renderer.toneMapping = street.saved.tm; renderer.outputEncoding = street.saved.enc; renderer.setClearColor(0x000000, 1);
+    scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+    $('q').textContent = QUALITY === 'high' ? 'AO · BLOOM · HDR' : 'MOBILE PRESET';
+  }
+  street.active = false; SPEEDS = TUNNEL_SPEED; START_SPEED = SPEEDS.start; MAX_SPEED = SPEEDS.max; ACCEL = SPEEDS.accel;
+}
+function streetUpdate() {
+  if (!street.active || !street.viewer || street.moving) return;
+  if (state.traveled - street.lastHopD < street.spacing) return;
+  street.lastHopD = state.traveled;
+  let next = street.index + 1;
+  if (next >= street.ids.length) { next = 0; $('fade').style.opacity = 1; setTimeout(() => { $('fade').style.opacity = 0; }, 350); }
+  street.moving = true;
+  street.viewer.moveTo(street.ids[next]).then(() => { street.index = next; street.moving = false; }).catch(() => { street.moving = false; });
+}
+async function geolocate() {
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) { rej(new Error('Location is not available in this browser.')); return; }
+    navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lon: p.coords.longitude, name: 'your location' }), () => rej(new Error('Location permission was refused.')), { enableHighAccuracy: true, timeout: 10000 });
+  });
+}
+
+/* ============================================================
    Dust motes
    ============================================================ */
 function buildDust() {
@@ -1127,8 +1281,26 @@ function resetWorld() {
   state.segIndex = segments.length;
   updateHUD();
 }
-function startRun() {
+let streetPlace = null;
+async function startRun() {
+  if ($('streetOn').checked) {
+    if (!streetPlace && !$('pc').value.trim()) { setStreetStatus('Enter a postcode or address, or use MY LOCATION.', true); return; }
+    $('btnStart').disabled = true;
+    try {
+      if (!streetPlace || streetPlace.query !== $('pc').value.trim()) { setStreetStatus('Looking up ' + $('pc').value.trim() + '…'); streetPlace = Object.assign(await geocode($('pc').value.trim()), { query: $('pc').value.trim() }); }
+      if (!street.active || street.place !== streetPlace) { await startStreet(streetPlace); street.place = streetPlace; }
+    } catch (e) {
+      const blocked = /claude/.test(location.hostname) || (e && /Failed to fetch|NetworkError|script /.test(e.message || ''));
+      setStreetStatus(blocked ? 'Street mode cannot load imagery inside this frame. Open the standalone file or a hosted copy.' : (e.message || 'Street mode failed.'), true);
+      $('btnStart').disabled = false; return;
+    }
+    $('btnStart').disabled = false;
+  } else if (street.active) { stopStreet(); }
+  beginRun();
+}
+function beginRun() {
   audioInit(); resetWorld(); state.mode = 'run';
+  street.lastHopD = 0;
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
   $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
@@ -1151,8 +1323,9 @@ function doJump() { if (state.mode !== 'run') return; if (player.grounded && pla
 function doRoll() { if (state.mode !== 'run') return; if (player.grounded) { if (player.rolling <= 0) player.rolling = ROLL_TIME; } else player.fastFall = true; }
 const KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ']);
 window.addEventListener('keydown', (e) => {
-  if (KEYS.has(e.key)) e.preventDefault();
+  if (KEYS.has(e.key) && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) e.preventDefault();
   if (e.repeat) return; const k = e.key;
+  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
   if (state.mode === 'idle' && (k === ' ' || k === 'Enter')) { e.preventDefault(); startRun(); return; }
   if (state.mode === 'dead' && (k === ' ' || k === 'Enter') && $('dead').classList.contains('on')) { e.preventDefault(); startRun(); return; }
   if (k === 'v' || k === 'V') { setView(view === 'fp' ? 'tp' : 'fp'); return; }
@@ -1172,6 +1345,11 @@ canvas.addEventListener('pointerup', (e) => {
 });
 $('btnStart').addEventListener('click', startRun);
 $('btnAgain').addEventListener('click', startRun);
+$('btnMenu').addEventListener('click', () => { state.mode = 'idle'; $('dead').classList.remove('on'); $('hud').classList.remove('on'); $('best').classList.remove('on'); $('view').classList.remove('on'); $('start').classList.add('on'); });
+$('streetOn').addEventListener('change', () => { $('streetBox').classList.toggle('on', $('streetOn').checked); });
+$('btnLoc').addEventListener('click', async () => { try { setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); $('pc').value = ''; setStreetStatus('Location found. Press START RUN.'); } catch (e) { setStreetStatus(e.message, true); } });
+$('pc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startRun(); } e.stopPropagation(); });
+$('mly').addEventListener('keydown', (e) => e.stopPropagation());
 $('view').addEventListener('click', () => setView(view === 'fp' ? 'tp' : 'fp'));
 
 /* ============================================================
@@ -1221,6 +1399,7 @@ function update(dt) {
   const difficulty = clamp((state.speed - START_SPEED) / (MAX_SPEED - START_SPEED), 0, 1);
   if (state.mode !== 'idle') while (state.spawnCursor - state.traveled < SPAWN_AHEAD) { const len = spawnBand(state.spawnCursor, difficulty); state.spawnCursor += len + rand(10, 22) - difficulty * 6; }
 
+  streetUpdate();
   for (const s of segments) {
     if (s.d0 + SEG_LEN < state.traveled - 16) { s.d0 += SEG_LEN * SEG_COUNT; styleSegment(s, state.segIndex++); }
     s.root.position.z = -(s.d0 + SEG_LEN / 2 - state.traveled);
@@ -1320,9 +1499,9 @@ function update(dt) {
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
     if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
     camera.position.set(ex, ey, ez);
-    camera.lookAt(player.x + lean * 3, pitchY, -9);
+    camera.lookAt(player.x + lean * 3, street.active ? ey - 0.05 + (rolling ? -0.5 : 0) + clamp(player.vy * 0.03, -0.2, 0.2) : pitchY, -9);
     camera.rotateZ(roll);
-    camera.fov = 68 + speed * 0.28;
+    camera.fov = street.active && street.fov ? street.fov : 68 + speed * 0.28;
   } else {
     camera.position.set(player.camX + (Math.random() - 0.5) * shake, 2.75 + player.camY + bob + (Math.random() - 0.5) * shake, 5.5 - Math.min(1.0, speed * 0.02));
     camera.lookAt(player.camX * 0.5, 1.35 + player.camY + Math.min(1.3, player.y * 0.35), -7);
@@ -1338,6 +1517,7 @@ function update(dt) {
   cands.sort((a, b) => Math.abs(a.z + 7) - Math.abs(b.z + 7));
   for (let i = 0; i < lights.lampLights.length; i++) {
     const pl = lights.lampLights[i], c = cands[i];
+    if (street.active) { pl.intensity = 0; continue; }
     if (c) { pl.position.set(c.l.x, c.l.y, c.z); pl.color.setHex(c.l.color); pl.intensity = c.l.intensity * (0.93 + Math.sin(state.time * 37 + i * 7) * 0.04 + Math.sin(state.time * 7.3 + i) * 0.03); }
     else pl.intensity = 0;
   }
@@ -1373,7 +1553,7 @@ function frame(now) {
   if (!running) { last = now; return; }
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   update(dt);
-  composer.render(dt);
+  if (street.active) { renderer.setRenderTarget(null); renderer.render(scene, camera); } else composer.render(dt);
 }
 document.addEventListener('visibilitychange', () => { running = !document.hidden; last = performance.now(); });
 
@@ -1396,6 +1576,8 @@ async function boot() {
   buildPost();
   resetWorld();
   window.addEventListener('resize', onResize);
+  try { const t = localStorage.getItem('indiswipeout.mly') || (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || ''; if (t) $('mly').value = t; } catch (e) { /* ignore */ }
+  const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) { $('pc').value = qm.get('pc'); $('streetOn').checked = true; $('streetBox').classList.add('on'); }
   setProgress(1, 'READY');
   $('loading').classList.add('off'); $('start').classList.add('on');
   requestAnimationFrame(frame);

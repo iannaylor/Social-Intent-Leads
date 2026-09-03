@@ -1,0 +1,29 @@
+# Publishes subway-surfers/ (Indi's Wipeout) to GitHub Pages.
+# Enable once in the repo: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+name: Deploy Indi's Wipeout to GitHub Pages
+on:
+  push:
+    branches: [main, claude/photorealistic-subway-surfers-5v46j2]
+    paths: ['subway-surfers/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: subway-surfers
+      - id: deployment
+        uses: actions/deploy-pages@v4

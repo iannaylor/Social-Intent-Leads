@@ -16,6 +16,30 @@ model to 1.78 m, faces it down the track, and picks animation clips whose names
 contain `run`, `jump`, `roll` and `idle`. Press V to switch cameras once it has
 loaded.
 
+## Street mode
+
+Tick **STREET MODE** on the start card, type a postcode or address (or press
+MY LOCATION), and the run plays through real street-level photos of that place
+from [Mapillary](https://www.mapillary.com), with the barriers, gates and coins
+laid over the road. As you run, the view steps forward along the street.
+
+It needs a free Mapillary access token: create one at
+mapillary.com/developer, paste it into the token field once (it is remembered
+in the browser), or put it in `window.INDI_CONFIG.mapillaryToken` at the top
+of `index.html` for a hosted copy. You can also open the page with
+`?pc=SW1A%201AA&mly=TOKEN`.
+
+Street mode fetches imagery from Mapillary's servers, so it works from the
+standalone file or a hosted copy, not inside the Claude artifact frame.
+Trains are left out of street runs; the tunnel remains the default mode.
+
+### Hosting on GitHub Pages
+
+`.github/workflows/pages.yml` publishes this folder to GitHub Pages on every
+push. Enable it once in the repository: Settings, Pages, Build and deployment,
+Source: GitHub Actions. The game is then at
+`https://<owner>.github.io/<repo>/`.
+
 ## Controls
 
 | Action        | Keyboard                 | Touch        |
