@@ -1061,9 +1061,12 @@ function setView(v) {
 }
 
 /* ============================================================
-   Street mode: run through Mapillary street-level imagery
+   Street mode: the game lives inside the Mapillary viewer's 3D world.
+   Obstacles are placed at real positions along the photographed road and
+   drawn with the viewer's own camera every frame (custom renderer), so
+   they share its perspective, lens and motion.
    ============================================================ */
-const street = { active: false, viewer: null, ids: [], index: 0, spacing: 8, lastHopD: 0, moving: false, lastLngLat: null, fov: 0, ground: null, saved: null };
+const street = { active: false, viewer: null, ids: [], index: 0, pano: false, pos: {}, ref: null, path: [], s: 0, camH: 1.45, nextSpawn: 0, objs: [], three: null, moving: false, ended: false, lastS: 0, speed: 0, place: null, segHint: 0 };
 const streetEl = $('street');
 function loadScript(url) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = url; el.onload = res; el.onerror = () => rej(new Error('script ' + url)); document.head.appendChild(el); }); }
 function loadCss(url) { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = url; document.head.appendChild(el); }
@@ -1086,15 +1089,18 @@ async function geocode(q) {
 }
 function haversine(a, b) { const R = 6371000, dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lng - a.lng) * Math.PI / 180; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
 function bearing(a, b) { const y = Math.sin((b.lng - a.lng) * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180); const x = Math.cos(a.lat * Math.PI / 180) * Math.sin(b.lat * Math.PI / 180) - Math.sin(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.cos((b.lng - a.lng) * Math.PI / 180); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; }
-function angleDiff(a, b) { let d = Math.abs(((a - b) % 360 + 540) % 360 - 180); return d; }
+function angleDiff(a, b) { return Math.abs(((a - b) % 360 + 540) % 360 - 180); }
 const geoOf = (img) => ({ lat: img.computed_geometry.coordinates[1], lng: img.computed_geometry.coordinates[0] });
+const IMG_FIELDS = 'id,computed_geometry,computed_altitude,computed_compass_angle,sequence,captured_at,is_pano';
+function recordPos(im) { street.pos[im.id] = { ll: geoOf(im), compass: im.computed_compass_angle, alt: im.computed_altitude }; }
+
 /* Find a street sequence near the point whose camera faces along the road: 360 imagery (which we can
    turn to face the travel direction) or forward-facing dashcam style imagery. Sideways sequences are rejected. */
 async function findStart(lat, lon, token) {
   const here = { lat, lng: lon };
   for (const half of [0.004, 0.012, 0.03]) {
     const bbox = [lon - half, lat - half, lon + half, lat + half].join(',');
-    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,computed_geometry,computed_compass_angle,sequence,captured_at,is_pano&bbox=${bbox}&limit=600`);
+    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=${IMG_FIELDS}&bbox=${bbox}&limit=600`);
     if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Mapillary rejected the token.' : 'Mapillary search failed (' + r.status + ').');
     const j = await r.json(); const imgs = (j.data || []).filter((i) => i.sequence && i.computed_geometry);
     const bySeq = new Map();
@@ -1107,7 +1113,7 @@ async function findStart(lat, lon, token) {
       const devs = [];
       for (let i = 0; i + 1 < list.length; i++) { const a = geoOf(list[i]), b = geoOf(list[i + 1]); if (haversine(a, b) < 1.5 || list[i].computed_compass_angle === undefined) continue; devs.push(angleDiff(list[i].computed_compass_angle, bearing(a, b))); }
       devs.sort((a, b) => a - b); const med = devs.length ? devs[Math.floor(devs.length / 2)] : 999;
-      if (!pano && med > 32) continue;                    // camera not facing along the road
+      if (!pano && med > 32) continue;
       let nearest = null, nd = 1e9;
       for (const im of list) { const d = haversine(here, geoOf(im)); if (d < nd) { nd = d; nearest = im; } }
       cands.push({ seq, list, pano, med, nearest, dist: nd - (pano ? 120 : 0) });
@@ -1119,14 +1125,187 @@ async function findStart(lat, lon, token) {
       const js = await rs.json(); const ids = (js.data || []).map((x) => x.id);
       const idx = ids.indexOf(c.nearest.id);
       if (idx < 0 || ids.length < 8) continue;
-      const pos = {}; for (const im of c.list) pos[im.id] = { ll: geoOf(im), compass: im.computed_compass_angle };
-      if (ids.length - idx >= 8) return { ids, index: idx, pano: c.pano, pos, reversed: false };
-      if (c.pano) return { ids: ids.slice().reverse(), index: ids.length - 1 - idx, pano: true, pos, reversed: true };
+      for (const im of c.list) recordPos(im);
+      // positions for the whole sequence (best effort; unknown ones are learned as we pass them)
+      try {
+        const ra = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=${IMG_FIELDS}&sequence_ids=${encodeURIComponent(c.seq)}&limit=2000`);
+        if (ra.ok) { const ja = await ra.json(); for (const im of (ja.data || [])) if (im.computed_geometry) recordPos(im); }
+      } catch (e) { /* ignore */ }
+      if (ids.length - idx >= 8) return { ids, index: idx, pano: c.pano, seq: c.seq };
+      if (c.pano) return { ids: ids.slice().reverse(), index: ids.length - 1 - idx, pano: true, seq: c.seq };
     }
   }
   throw new Error('No road-facing street imagery near there. Try a main road or a town centre.');
 }
 function setStreetStatus(msg, bad) { const n = $('streetNote'); n.innerHTML = msg; n.style.color = bad ? '#e0705f' : ''; }
+
+/* ---- path in local (east, north, up) metres, built from the sequence's image positions */
+function buildPath() {
+  if (!street.ref) return;
+  const ref = street.ref, pts = [];
+  for (let i = 0; i < street.ids.length; i++) {
+    const p = street.pos[street.ids[i]]; if (!p || !p.ll) continue;
+    const alt = (p.alt !== undefined && p.alt !== null) ? p.alt : ref.alt;
+    const enu = window.mapillary.geodeticToEnu(p.ll.lng, p.ll.lat, alt, ref.lng, ref.lat, ref.alt);
+    if (pts.length && Math.hypot(enu[0] - pts[pts.length - 1].e, enu[1] - pts[pts.length - 1].n) < 0.5) continue;
+    pts.push({ e: enu[0], n: enu[1], u: enu[2], s: 0, idx: i });
+  }
+  for (let i = 1; i < pts.length; i++) pts[i].s = pts[i - 1].s + Math.hypot(pts[i].e - pts[i - 1].e, pts[i].n - pts[i - 1].n);
+  street.path = pts;
+  buildRibbon();
+}
+function pathLength() { return street.path.length ? street.path[street.path.length - 1].s : 0; }
+function pathAt(sd) { // point, forward bearing (deg from north) at path distance sd
+  const P = street.path; if (P.length < 2) return null;
+  let i = 1; while (i < P.length - 1 && P[i].s < sd) i++;
+  const a = P[i - 1], b = P[i], t = clamp((sd - a.s) / Math.max(0.01, b.s - a.s), 0, 1);
+  const th = Math.atan2(b.e - a.e, b.n - a.n);
+  return { e: a.e + (b.e - a.e) * t, n: a.n + (b.n - a.n) * t, u: a.u + (b.u - a.u) * t, th };
+}
+function projectToPath(e, n) {
+  const P = street.path; if (P.length < 2) return 0;
+  let best = 0, bd = 1e18;
+  const lo = Math.max(1, street.segHint - 25), hi = Math.min(P.length - 1, street.segHint + 25);
+  for (let i = lo; i <= hi; i++) {
+    const a = P[i - 1], b = P[i], dx = b.e - a.e, dy = b.n - a.n, L2 = dx * dx + dy * dy || 1;
+    const t = clamp(((e - a.e) * dx + (n - a.n) * dy) / L2, 0, 1);
+    const px = a.e + dx * t, py = a.n + dy * t, d = (px - e) ** 2 + (py - n) ** 2;
+    if (d < bd) { bd = d; best = a.s + Math.sqrt(L2) * t; street.segHint = i; }
+  }
+  return best;
+}
+// child frame used for game objects: x east, y up, -z north  (wrapper rotates it into east/north/up)
+function toChild(e, n, u) { return new THREE.Vector3(e, u, -n); }
+function placeOnPath(g, d, lane) {
+  const q = pathAt(d); if (!q) return false;
+  const L = LANE_X[lane], e = q.e + L * Math.cos(q.th), n = q.n - L * Math.sin(q.th);
+  g.position.copy(toChild(e, n, q.u - street.camH)); g.rotation.set(0, -q.th, 0);
+  return true;
+}
+function buildRibbon() {
+  const T3 = street.three; if (!T3) return;
+  if (T3.ribbon) { T3.wrap.remove(T3.ribbon); T3.ribbon.geometry.dispose(); T3.ribbon = null; }
+  const P = street.path; if (P.length < 2) return;
+  const pos = [], idx = [], W = 5.5;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], th = Math.atan2(b.e - a.e, b.n - a.n);
+    const rx = Math.cos(th), rn = -Math.sin(th), u = P[i].u - street.camH;
+    const l = toChild(P[i].e - rx * W, P[i].n - rn * W, u), r = toChild(P[i].e + rx * W, P[i].n + rn * W, u);
+    pos.push(l.x, l.y, l.z, r.x, r.y, r.z);
+    if (i) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.ShadowMaterial({ opacity: 0.4, side: THREE.DoubleSide })); m.receiveShadow = true; T3.wrap.add(m); T3.ribbon = m;
+}
+
+/* ---- custom renderer: draws the game scene with the viewer's camera */
+function makeStreetRenderer() {
+  const T3 = { renderer: null, scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera(), wrap: new THREE.Group(), sun: null, hemi: null, ribbon: null, tmp: new THREE.Matrix4(), off: new THREE.Matrix4(), camPos: new THREE.Vector3() };
+  T3.camera.matrixAutoUpdate = false;
+  T3.wrap.rotation.x = Math.PI / 2; T3.scene.add(T3.wrap);
+  T3.scene.fog = new THREE.FogExp2(0xbcc1c8, 0.012);
+  T3.hemi = new THREE.HemisphereLight(0xd6e4ff, 0x6a6258, 0.9); T3.hemi.position.set(0, 1, 0); T3.wrap.add(T3.hemi);
+  T3.sun = new THREE.DirectionalLight(0xfff1dc, 1.6); T3.sun.castShadow = true;
+  T3.sun.shadow.mapSize.set(1024, 1024); T3.sun.shadow.camera.left = -30; T3.sun.shadow.camera.right = 30; T3.sun.shadow.camera.top = 30; T3.sun.shadow.camera.bottom = -30; T3.sun.shadow.camera.near = 1; T3.sun.shadow.camera.far = 140; T3.sun.shadow.bias = -0.0006; T3.sun.shadow.normalBias = 0.03;
+  T3.wrap.add(T3.sun); T3.wrap.add(T3.sun.target);
+  street.three = T3;
+  return {
+    id: 'indis-wipeout', renderPass: window.mapillary.RenderPass.Opaque,
+    onAdd(v, reference, context) {
+      street.ref = reference;
+      T3.renderer = new THREE.WebGLRenderer({ canvas: v.getCanvas(), context, antialias: false });
+      T3.renderer.autoClear = false; T3.renderer.shadowMap.enabled = true; T3.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      T3.renderer.outputEncoding = THREE.sRGBEncoding; T3.renderer.toneMapping = THREE.ACESFilmicToneMapping; T3.renderer.toneMappingExposure = 1.0;
+      T3.renderer.setPixelRatio(1);
+      buildPath();
+    },
+    onReference(v, reference) { street.ref = reference; buildPath(); for (const o of street.objs) placeOnPath(o.g, o.d, o.lane); },
+    onRemove() { if (T3.renderer) { T3.renderer.dispose(); T3.renderer = null; } },
+    render(context, viewMatrix, projectionMatrix) {
+      const r = T3.renderer; if (!r) return;
+      const c = v0.getCanvas(); if (r.domElement.width !== c.width || r.domElement.height !== c.height) { /* shared canvas: sizes already match */ }
+      r.setSize(c.width, c.height, false);
+      T3.tmp.fromArray(viewMatrix).invert();
+      T3.camPos.setFromMatrixPosition(T3.tmp);
+      street.s = projectToPath(T3.camPos.x, T3.camPos.y);
+      // lane change, jump and roll move the eye, not the photo
+      T3.off.makeTranslation(player.x, player.y - (player.rolling > 0 ? 0.55 : 0) + Math.sin(player.runPhase * 2) * 0.025, 0);
+      T3.tmp.multiply(T3.off);
+      T3.camera.matrix.copy(T3.tmp); T3.camera.updateMatrixWorld(true);
+      T3.camera.projectionMatrix.fromArray(projectionMatrix); T3.camera.projectionMatrixInverse.copy(T3.camera.projectionMatrix).invert();
+      // sun follows the eye (in the child frame: x east, y up, -z north)
+      const cp = toChild(T3.camPos.x, T3.camPos.y, T3.camPos.z);
+      T3.sun.position.set(cp.x + 22, cp.y + 45, cp.z - 18); T3.sun.target.position.set(cp.x, cp.y - street.camH, cp.z - 20); T3.sun.target.updateMatrixWorld();
+      r.resetState(); r.render(T3.scene, T3.camera);
+    },
+  };
+}
+let v0 = null; // current viewer (for the renderer closure)
+
+/* ---- street obstacles: static objects along the path */
+function streetSpawn() {
+  const horizon = street.s + 110, total = pathLength();
+  let guard = 0;
+  while (street.nextSpawn < horizon && street.nextSpawn + 6 < total && guard++ < 12) {
+    const d = street.nextSpawn, lanes = [0, 1, 2], sh = lanes.slice().sort(() => Math.random() - 0.5);
+    const r = Math.random(), diff = clamp((street.s - 60) / 900, 0, 1);
+    if (r < 0.62) {
+      const blocked = Math.random() < 0.45 + diff * 0.4 ? 2 : 1;
+      for (let i = 0; i < blocked; i++) { const type = pick(['hurdle', 'gate', 'wall', 'hurdle', 'gate']); addStreetObj(spawnBarrierObj(type), type, sh[i], d); if (type === 'hurdle' && Math.random() < 0.6) streetCoinArc(sh[i], d - 4); }
+      const free = sh.slice(blocked); if (free.length && Math.random() < 0.7) streetCoinLine(pick(free), d - 3, 5);
+      street.nextSpawn = d + rand(15, 26) - diff * 7;
+    } else if (r < 0.85) {
+      let lane = irand(0, 2); for (let i = 0; i < 3; i++) { streetCoinLine(lane, d + i * 7, 4); lane = clamp(lane + (Math.random() < 0.5 ? -1 : 1), 0, 2); }
+      street.nextSpawn = d + 28;
+    } else {
+      const l = irand(0, 2); addStreetObj(spawnBarrierObj('gate'), 'gate', l, d); addStreetObj(spawnBarrierObj('hurdle'), 'hurdle', (l + 1) % 3, d + 9); streetCoinArc((l + 1) % 3, d + 5);
+      street.nextSpawn = d + 24;
+    }
+  }
+}
+function spawnBarrierObj(type) { const pool = pools.barrier[type] || (pools.barrier[type] = []); const obj = pool.pop() || makeBarrier(type); obj.g.visible = true; return obj; }
+function addStreetObj(obj, type, lane, d) { obj.type = type; obj.lane = lane; obj.d = d; if (!placeOnPath(obj.g, d, lane)) { obj.g.visible = false; (pools.barrier[type]).push(obj); return; } street.objs.push(obj); }
+function streetCoin(lane, d, y) {
+  let obj = pools.coin.pop();
+  if (!obj) { const g = new THREE.Group(); g.add(mesh(G.coin, M.coin, true, false)); g.add(mesh(G.coinFace, M.coin, false, false)); obstacleRoot.add(g); obj = { g }; }
+  obj.g.visible = true; obj.type = 'coin'; obj.lane = lane; obj.d = d; obj.y = y;
+  if (!placeOnPath(obj.g, d, lane)) { obj.g.visible = false; pools.coin.push(obj); return; }
+  obj.g.position.y += y; street.objs.push(obj);
+}
+function streetCoinLine(lane, d, n) { for (let i = 0; i < n; i++) streetCoin(lane, d + i * 1.7, 1.0); }
+function streetCoinArc(lane, d) { const ys = [1.0, 1.5, 1.95, 2.2, 1.95, 1.5, 1.0]; for (let i = 0; i < ys.length; i++) streetCoin(lane, d + i * 1.25, ys[i]); }
+function releaseStreetObj(o) { o.g.visible = false; if (o.type === 'coin') pools.coin.push(o); else pools.barrier[o.type].push(o); }
+function clearStreetObjs() { for (const o of street.objs) releaseStreetObj(o); street.objs.length = 0; }
+
+/* ---- driving: keep stepping to the next image; the viewer animates the camera between them */
+function streetDrive() {
+  if (!street.viewer || street.moving || street.ended || state.mode !== 'run') return;
+  const next = street.index + 1;
+  if (next >= street.ids.length) { streetWrap(); return; }
+  street.moving = true;
+  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; street.moving = false; faceDownRoad(img); }).catch(() => { street.moving = false; street.index = next; });
+}
+function streetWrap() {
+  street.ended = true; $('fade').style.opacity = 1;
+  setTimeout(() => {
+    clearStreetObjs(); street.index = 0; street.segHint = 0;
+    street.viewer.moveTo(street.ids[0]).then(() => { street.ended = false; street.moving = false; street.nextSpawn = street.s + 30; $('fade').style.opacity = 0; }).catch(() => { street.ended = false; $('fade').style.opacity = 0; });
+  }, 350);
+}
+function faceDownRoad(img) {
+  if (!street.pano || !street.viewer) return;
+  const i = street.index, ids = street.ids;
+  const cur = street.pos[ids[i]] && street.pos[ids[i]].ll;
+  let ahead = null; for (let k = i + 1; k < Math.min(ids.length, i + 6) && !ahead; k++) if (street.pos[ids[k]] && street.pos[ids[k]].ll) ahead = street.pos[ids[k]].ll;
+  let behind = null; for (let k = i - 1; k >= Math.max(0, i - 6) && !behind; k--) if (street.pos[ids[k]] && street.pos[ids[k]].ll) behind = street.pos[ids[k]].ll;
+  if (!cur || (!ahead && !behind)) return;
+  const heading = ahead ? bearing(cur, ahead) : bearing(behind, cur);
+  const compass = (img && img.computedCompassAngle !== undefined) ? img.computedCompassAngle : (street.pos[ids[i]] && street.pos[ids[i]].compass);
+  if (compass === undefined) return;
+  let x = 0.5 + (heading - compass) / 360; x = x - Math.floor(x);
+  try { street.viewer.setCenter([x, 0.5]); } catch (e) { /* ignore */ }
+}
+
 async function startStreet(place) {
   const token = streetToken();
   if (!token) throw new Error('Enter a Mapillary access token first.');
@@ -1144,73 +1323,66 @@ async function startStreet(place) {
     accessToken: token, container: streetEl, imageId: start.ids[start.index], trackResize: true,
     component: { cover: false, direction: false, sequence: false, zoom: false, bearing: false, keyboard: false, pointer: false, attribution: true, cache: true, spatial: false },
   });
-  street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.lastLngLat = null; street.spacing = 8; street.moving = false; street.lastHopD = 0;
-  street.pano = start.pano; street.pos = start.pos || {};
+  v0 = viewer;
+  street.viewer = viewer; street.ids = start.ids; street.index = start.index; street.pano = start.pano; street.camH = start.pano ? 2.2 : 1.45;
+  street.moving = false; street.ended = false; street.s = 0; street.lastS = 0; street.speed = 0; street.segHint = 0; street.path = [];
   viewer.on('image', (ev) => {
     const img = ev.image; if (!img) return;
     const ll = img.computedLngLat || img.lngLat;
-    if (ll && street.lastLngLat) { const d = haversine(street.lastLngLat, ll); if (d > 1) street.spacing = clamp(d, 3, 25); }
-    if (ll) street.lastLngLat = ll;
     const i = street.ids.indexOf(img.id); if (i >= 0) street.index = i;
-    if (ll) { const rec = street.pos[img.id] || (street.pos[img.id] = {}); rec.ll = { lat: ll.lat, lng: ll.lng }; if (rec.compass === undefined && img.computedCompassAngle !== undefined) rec.compass = img.computedCompassAngle; }
+    if (ll && !(street.pos[img.id] && street.pos[img.id].ll)) { street.pos[img.id] = { ll: { lat: ll.lat, lng: ll.lng }, compass: img.computedCompassAngle, alt: img.computedAltitude }; buildPath(); }
     faceDownRoad(img);
   });
-  viewer.on('fov', () => viewer.getFieldOfView().then((f) => { street.fov = f; }).catch(() => {}));
-  const readPov = () => { try { viewer.getPointOfView().then((p) => { if (p && typeof p.tilt === 'number') street.tilt = p.tilt; }).catch(() => {}); } catch (e) { /* ignore */ } };
-  viewer.on('pov', readPov); viewer.on('image', readPov); viewer.on('moveend', readPov);
+  viewer.addCustomRenderer(makeStreetRenderer());
   await new Promise((res) => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; viewer.on('load', fin); viewer.on('image', fin); setTimeout(fin, 6000); });
+  if (!street.ref) { try { street.ref = await viewer.getReference(); buildPath(); } catch (e) { /* ignore */ } }
   try { viewer.setCenter([0.5, 0.5]); } catch (e) { /* ignore */ }
-  try { street.fov = await viewer.getFieldOfView(); } catch (e) { street.fov = 0; }
-  street.tilt = 0; try { const p = await viewer.getPointOfView(); if (p && typeof p.tilt === 'number') street.tilt = p.tilt; } catch (e) { /* ignore */ }
-  // scene: hide the tunnel, daylight, transparent clear, built-in tone mapping
-  street.saved = { fog: scene.fog, bg: scene.background, key: lights.key.intensity, keyCol: lights.key.color.getHex(), hemi: lights.hemi.intensity, tm: renderer.toneMapping, enc: renderer.outputEncoding };
-  scene.fog = new THREE.FogExp2(0xb9bec6, 0.016); scene.background = null;
-  for (const sg of segments) sg.root.visible = false;
-  dust.pts.visible = false;
-  lights.key.intensity = 1.7; lights.key.color.setHex(0xfff2dc); lights.hemi.intensity = 0.6; lights.hemi.color.setHex(0xbfd4ff); lights.hemi.groundColor.setHex(0x6a6258);
-  if (!street.ground) { street.ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 260), new THREE.ShadowMaterial({ opacity: 0.38 })); street.ground.rotation.x = -Math.PI / 2; street.ground.position.z = -100; street.ground.receiveShadow = true; scene.add(street.ground); }
-  street.ground.visible = true;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0; renderer.outputEncoding = THREE.sRGBEncoding; renderer.setClearColor(0x000000, 0);
-  scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  // hand the obstacle pool to the street scene
+  street.three.wrap.add(obstacleRoot);
+  for (const t of trains) { t.g.visible = false; pools.train[t.len].push(t); } trains.length = 0;
+  for (const b of barriers) { b.g.visible = false; pools.barrier[b.type].push(b); } barriers.length = 0;
+  for (const c of coins) { c.g.visible = false; pools.coin.push(c); } coins.length = 0;
+  canvas.style.visibility = 'hidden';
   street.active = true; SPEEDS = STREET_SPEED; START_SPEED = SPEEDS.start; MAX_SPEED = SPEEDS.max; ACCEL = SPEEDS.accel;
   $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase();
   setStreetStatus('Street imagery loaded. Run!');
 }
-function faceDownRoad(img) {
-  if (!street.pano || !street.viewer) return;
-  const i = street.index, ids = street.ids;
-  const cur = street.pos[ids[i]] && street.pos[ids[i]].ll;
-  let ahead = null; for (let k = i + 1; k < Math.min(ids.length, i + 6) && !ahead; k++) if (street.pos[ids[k]] && street.pos[ids[k]].ll) ahead = street.pos[ids[k]].ll;
-  let behind = null; for (let k = i - 1; k >= Math.max(0, i - 6) && !behind; k--) if (street.pos[ids[k]] && street.pos[ids[k]].ll) behind = street.pos[ids[k]].ll;
-  if (!cur || (!ahead && !behind)) return;
-  const heading = ahead ? bearing(cur, ahead) : bearing(behind, cur);
-  const compass = (img && img.computedCompassAngle !== undefined) ? img.computedCompassAngle : (street.pos[ids[i]] && street.pos[ids[i]].compass);
-  if (compass === undefined) return;
-  let x = 0.5 + (heading - compass) / 360; x = x - Math.floor(x);
-  try { street.viewer.setCenter([x, 0.5]); } catch (e) { /* ignore */ }
-}
 function stopStreet() {
-  if (street.viewer) { try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; }
+  if (street.viewer) { try { street.viewer.remove(); } catch (e) { /* ignore */ } street.viewer = null; v0 = null; }
   streetEl.classList.remove('on'); streetEl.innerHTML = '';
-  if (street.active && street.saved) {
-    scene.fog = street.saved.fog; scene.background = street.saved.bg;
-    for (const sg of segments) sg.root.visible = true; dust.pts.visible = true;
-    lights.key.intensity = street.saved.key; lights.key.color.setHex(street.saved.keyCol); lights.hemi.intensity = street.saved.hemi; lights.hemi.color.setHex(0x3a4250); lights.hemi.groundColor.setHex(0x171311);
-    if (street.ground) street.ground.visible = false;
-    renderer.toneMapping = street.saved.tm; renderer.outputEncoding = street.saved.enc; renderer.setClearColor(0x000000, 1);
-    scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  clearStreetObjs();
+  if (street.active) {
+    scene.add(obstacleRoot);
+    canvas.style.visibility = '';
     $('q').textContent = QUALITY === 'high' ? 'AO · BLOOM · HDR' : 'MOBILE PRESET';
   }
+  street.three = null;
   street.active = false; SPEEDS = TUNNEL_SPEED; START_SPEED = SPEEDS.start; MAX_SPEED = SPEEDS.max; ACCEL = SPEEDS.accel;
 }
-function streetUpdate() {
-  if (!street.active || !street.viewer || street.moving) return;
-  if (state.traveled - street.lastHopD < street.spacing) return;
-  street.lastHopD = state.traveled;
-  let next = street.index + 1;
-  if (next >= street.ids.length) { next = 0; $('fade').style.opacity = 1; setTimeout(() => { $('fade').style.opacity = 0; }, 350); }
-  street.moving = true;
-  street.viewer.moveTo(street.ids[next]).then((img) => { street.index = next; street.moving = false; faceDownRoad(img); }).catch(() => { street.moving = false; });
+function streetUpdate(dt) {
+  if (!street.active) return;
+  streetDrive();
+  const ds = street.s - street.lastS; street.lastS = street.s;
+  if (dt > 0) street.speed = lerp(street.speed, clamp(ds / dt, 0, 30), Math.min(1, dt * 5));
+  if (state.mode === 'run') {
+    state.score += Math.max(0, ds) * 1.5;
+    if (street.nextSpawn < street.s + 20) street.nextSpawn = street.s + 24;
+    streetSpawn();
+  }
+  const spin = performance.now() * 0.0032;
+  for (let i = street.objs.length - 1; i >= 0; i--) {
+    const o = street.objs[i], rel = o.d - street.s;    // metres ahead
+    if (rel < -6 || rel > 200) { street.objs.splice(i, 1); releaseStreetObj(o); continue; }
+    if (o.type === 'coin') {
+      o.g.rotation.y = spin + o.d * 0.3;
+      if (state.mode === 'run' && Math.abs(rel) < 1.0 && o.lane === player.lane && o.y > player.y - 0.2 && o.y < player.y + 2.0) { street.objs.splice(i, 1); releaseStreetObj(o); state.coins++; state.score += 25; sfxCoin(); }
+    } else if (state.mode === 'run' && Math.abs(rel) < 0.6 && o.lane === player.lane) {
+      const h = player.rolling > 0 ? 0.8 : 1.72;
+      if (o.type === 'hurdle' && player.y < 0.9) die('TRIPPED ON A BARRIER');
+      else if (o.type === 'gate' && player.y + h > 1.24) die('CLOTHESLINED BY THE GATE');
+      else if (o.type === 'wall' && player.y < 2.15) die('RAN INTO THE FENCE');
+    }
+  }
 }
 async function geolocate() {
   return new Promise((res, rej) => {
@@ -1342,7 +1514,7 @@ async function startRun() {
 }
 function beginRun() {
   audioInit(); resetWorld(); state.mode = 'run';
-  street.lastHopD = 0;
+  if (street.active) { clearStreetObjs(); street.nextSpawn = street.s + 60; street.ended = false; }
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
   $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
@@ -1351,6 +1523,7 @@ function beginRun() {
 function die(cause) {
   if (state.mode !== 'run') return;
   state.mode = 'dead'; state.deathT = 0; state.hitFlash = 1; sfxHit();
+  if (street.active) { const f = $('fade'); f.style.background = '#5a0a05'; f.style.opacity = 0.55; setTimeout(() => { f.style.opacity = 0; setTimeout(() => { f.style.background = '#000'; }, 300); }, 250); }
   $('cause').textContent = cause;
   if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
   $('dScore').firstChild.textContent = String(Math.floor(state.score)); $('dCoins').firstChild.textContent = String(state.coins); $('dBest').firstChild.textContent = String(state.best);
@@ -1377,8 +1550,8 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); doRoll(); }
 });
 let touchStart = null;
-canvas.addEventListener('pointerdown', (e) => { touchStart = { x: e.clientX, y: e.clientY }; audioInit(); try { canvas.focus({ preventScroll: true }); } catch (err) { /* ignore */ } });
-canvas.addEventListener('pointerup', (e) => {
+window.addEventListener('pointerdown', (e) => { if (e.target && e.target.closest && e.target.closest('.card, button, input, a')) return; touchStart = { x: e.clientX, y: e.clientY }; audioInit(); try { canvas.focus({ preventScroll: true }); } catch (err) { /* ignore */ } });
+window.addEventListener('pointerup', (e) => {
   if (!touchStart) return;
   const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y; touchStart = null;
   const ax = Math.abs(dx), ay = Math.abs(dy);
@@ -1434,14 +1607,14 @@ function update(dt) {
   const run = state.mode === 'run';
   if (state.mode === 'dead') { state.deathT += dt; state.speed = Math.max(0, state.speed - dt * 45); state.hitFlash = Math.max(0, state.hitFlash - dt * 1.4); }
   if (run) { state.time += dt; state.speed = Math.min(MAX_SPEED, state.speed + ACCEL * dt); }
-  const speed = state.mode === 'idle' ? 5 : state.speed;
-  const dz = speed * dt;
+  const speed = street.active ? street.speed : (state.mode === 'idle' ? 5 : state.speed);
+  const dz = street.active ? 0 : speed * dt;
   state.traveled += dz;
-  if (run) state.score += dz * (1 + state.speed / MAX_SPEED);
+  if (run && !street.active) state.score += dz * (1 + state.speed / MAX_SPEED);
   const difficulty = clamp((state.speed - START_SPEED) / (MAX_SPEED - START_SPEED), 0, 1);
-  if (state.mode !== 'idle') while (state.spawnCursor - state.traveled < SPAWN_AHEAD) { const len = spawnBand(state.spawnCursor, difficulty); state.spawnCursor += len + rand(10, 22) - difficulty * 6; }
+  if (state.mode !== 'idle' && !street.active) while (state.spawnCursor - state.traveled < SPAWN_AHEAD) { const len = spawnBand(state.spawnCursor, difficulty); state.spawnCursor += len + rand(10, 22) - difficulty * 6; }
 
-  streetUpdate();
+  streetUpdate(dt);
   for (const s of segments) {
     if (s.d0 + SEG_LEN < state.traveled - 16) { s.d0 += SEG_LEN * SEG_COUNT; styleSegment(s, state.segIndex++); }
     s.root.position.z = -(s.d0 + SEG_LEN / 2 - state.traveled);
@@ -1468,7 +1641,7 @@ function update(dt) {
     const tx = LANE_X[player.lane];
     player.x += (tx - player.x) * Math.min(1, dt * 11);
     if (Math.abs(tx - player.x) < 0.01) player.x = tx;
-    const f = floorAt(player.x, player.y, dt);
+    const f = street.active ? { floor: 0, hit: null } : floorAt(player.x, player.y, dt);
     if (f.hit) {
       if (f.hit.side && player.lane !== player.prevLane) { player.lane = player.prevLane; player.x = LANE_X[player.lane] + (LANE_X[f.hit.train.lane] > LANE_X[player.lane] ? 0.5 : -0.5); player.stumble = 0.6; sfxStumble(); }
       else die(f.hit.cause);
@@ -1480,7 +1653,7 @@ function update(dt) {
         if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; player.fastFall = false; }
       } else { player.y = floor; player.grounded = true; player.vy = 0; }
       if (player.rolling > 0) player.rolling -= dt;
-      const cause = checkBarriers(player.x, player.y, player.rolling > 0 ? 0.8 : 1.72); if (cause) die(cause);
+      if (!street.active) { const cause = checkBarriers(player.x, player.y, player.rolling > 0 ? 0.8 : 1.72); if (cause) die(cause); }
     }
     if (player.stumble > 0) player.stumble -= dt;
   }
@@ -1498,7 +1671,7 @@ function update(dt) {
     pv.position.y = Math.max(0.35, pv.position.y - dt * 1.4); pv.rotation.x = Math.min(1.35, pv.rotation.x + dt * 4); pv.position.z += dt * 2.2;
   } else {
     pv.position.y = 0.85 + player.y; pv.position.z = 0;
-    const cadence = 2.3 + speed * 0.045;
+    const cadence = street.active ? 2.2 + speed * 0.08 : 2.3 + speed * 0.045;
     player.runPhase += cadence * dt * Math.PI * 2;
     const p = player.runPhase, sp = Math.sin(p), spn = Math.sin(p + Math.PI);
     if (player.rolling > 0) {
@@ -1524,6 +1697,7 @@ function update(dt) {
   }
 
   // ---- camera
+  if (street.active) { if (run) updateHUD(); return; }
   const camTargetY = state.mode === 'dead' ? player.camY : player.y * 0.55;
   player.camY = lerp(player.camY, camTargetY, Math.min(1, dt * 4));
   player.camX = lerp(player.camX, player.x * 0.6, Math.min(1, dt * 6));
@@ -1540,22 +1714,10 @@ function update(dt) {
     let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0);
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
     if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
-    if (street.active) {
-      const eyeS = rolling ? 0.7 : 1.4;
-      player.eye = lerp(player.eye, eyeS, Math.min(1, dt * 14));
-      ey = player.y + player.eye + bobY * 0.6 + (Math.random() - 0.5) * shake;
-      let pitch = THREE.MathUtils.degToRad(street.tilt || 0) + (rolling ? -0.22 : 0) + clamp(player.vy * 0.015, -0.12, 0.12);
-      if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.5, t); pitch = lerp(pitch, 0.9, t); roll += t * 0.9; }
-      camera.position.set(ex, ey, ez);
-      camera.rotation.order = 'YXZ';
-      camera.rotation.set(pitch, -lean * 0.5, roll);
-      camera.fov = street.fov || 68;
-    } else {
-      camera.position.set(ex, ey, ez);
-      camera.lookAt(player.x + lean * 3, pitchY, -9);
-      camera.rotateZ(roll);
-      camera.fov = 68 + speed * 0.28;
-    }
+    camera.position.set(ex, ey, ez);
+    camera.lookAt(player.x + lean * 3, pitchY, -9);
+    camera.rotateZ(roll);
+    camera.fov = 68 + speed * 0.28;
   } else {
     camera.position.set(player.camX + (Math.random() - 0.5) * shake, 2.75 + player.camY + bob + (Math.random() - 0.5) * shake, 5.5 - Math.min(1.0, speed * 0.02));
     camera.lookAt(player.camX * 0.5, 1.35 + player.camY + Math.min(1.3, player.y * 0.35), -7);
@@ -1607,7 +1769,7 @@ function frame(now) {
   if (!running) { last = now; return; }
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   update(dt);
-  if (street.active) { renderer.setRenderTarget(null); renderer.render(scene, camera); } else composer.render(dt);
+  if (!street.active) composer.render(dt);
 }
 document.addEventListener('visibilitychange', () => { running = !document.hidden; last = performance.now(); });
 

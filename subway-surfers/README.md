@@ -20,8 +20,13 @@ loaded.
 
 Tick **STREET MODE** on the start card, type a postcode or address (or press
 MY LOCATION), and the run plays through real street-level photos of that place
-from [Mapillary](https://www.mapillary.com), with the barriers, gates and coins
-laid over the road. As you run, the view steps forward along the street.
+from [Mapillary](https://www.mapillary.com). The game objects live inside the
+viewer's 3D world: barriers, gates and coins are placed at real positions along
+the photographed road and drawn through the viewer's own camera each frame
+(MapillaryJS custom renderer), so they share the photos' perspective and motion.
+The viewer flies continuously from image to image and your progress is read
+from its camera; sideways-facing sequences are rejected and 360 imagery is
+turned to face down the road.
 
 It needs a free Mapillary access token: create one at
 mapillary.com/developer, paste it into the token field once (it is remembered
