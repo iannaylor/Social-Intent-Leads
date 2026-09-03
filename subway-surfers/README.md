@@ -19,24 +19,17 @@ loaded.
 ## Street mode
 
 Tick **STREET MODE** on the start card, type a postcode or address (or press
-MY LOCATION), and the run plays through real street-level photos of that place
-from [Mapillary](https://www.mapillary.com). The game objects live inside the
-viewer's 3D world: barriers, gates and coins are placed at real positions along
-the photographed road and drawn through the viewer's own camera each frame
-(MapillaryJS custom renderer), so they share the photos' perspective and motion.
-The viewer flies continuously from image to image and your progress is read
-from its camera; sideways-facing sequences are rejected and 360 imagery is
-turned to face down the road.
+MY LOCATION), and the run moves from the tunnel onto a real 3D street: tarmac
+with markings, kerbs, pavements, garden walls and hedges, lamp posts, bins and
+parked cars as lane blockers. Around it, 360° photos of the chosen area from
+[Mapillary](https://www.mapillary.com) form the sky and skyline, turned to face
+down the road and cross-faded to the next photo every 260 m. Places with no
+360° coverage run with a plain sky and say so.
 
-It needs a free Mapillary access token: create one at
-mapillary.com/developer, paste it into the token field once (it is remembered
-in the browser), or put it in `window.INDI_CONFIG.mapillaryToken` at the top
-of `index.html` for a hosted copy. You can also open the page with
-`?pc=SW1A%201AA&mly=TOKEN`.
-
-Street mode fetches imagery from Mapillary's servers, so it works from the
-standalone file or a hosted copy, not inside the Claude artifact frame.
-Trains are left out of street runs; the tunnel remains the default mode.
+The Mapillary client token is built into the page (`window.INDI_CONFIG`); a
+different one can be passed as `?mly=TOKEN`. Place lookup uses postcodes.io for
+UK postcodes and Nominatim for anything else, so Street mode needs a hosted
+copy rather than the Claude artifact frame. `?pc=SW1A%201AA` pre-fills a place.
 
 ### Hosting on GitHub Pages
 
