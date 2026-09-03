@@ -25,6 +25,8 @@
   .plate.coins .val::before{content:"";display:inline-block;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fbe3a0,#c98a1e 70%,#7a4f0c);margin-right:8px;vertical-align:2px;box-shadow:0 0 6px rgba(224,168,58,.6)}
   #best{position:fixed;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));pointer-events:none;opacity:0;transition:opacity .4s}
   #best.on{opacity:1}
+  #view{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));min-width:0;padding:6px 12px 4px;opacity:0;transition:opacity .4s;cursor:pointer}
+  #view.on{opacity:1}
   #hint{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--ink-dim);opacity:0;transition:opacity .6s;pointer-events:none;text-shadow:0 2px 6px #000}
   #hint.on{opacity:.85}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
@@ -65,6 +67,7 @@
 <div id="best" class="plate"><div class="lbl">BEST</div><div class="val" id="bestv">000000</div></div>
 <div id="hint">SWIPE OR ARROW KEYS · SPACE JUMP · DOWN ROLL</div>
 <div id="q"></div>
+<div id="view" class="plate"><div class="lbl">VIEW · V</div><div class="val" id="viewv" style="font-size:16px">FIRST PERSON</div></div>
 
 <div id="start" class="overlay">
   <div class="card">
@@ -76,6 +79,7 @@
       <li><b>▲ JUMP</b>Clear the hurdles. Ride the ramps onto the cars.</li>
       <li><b>▼ ROLL</b>Duck under the clearance gates. Drop fast mid-air.</li>
       <li><b>▶ TRAINS</b>Stopped cars are a roof. Moving cars are the end.</li>
+      <li><b>◉ VIEW</b>First person. A rigged <code>runner.glb</code> beside the page unlocks the chase camera (V).</li>
     </ul>
     <button id="btnStart">START RUN</button>
   </div>
@@ -102,6 +106,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/fflate.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/RoundedBoxGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSAOShader.js"></script>
@@ -145,6 +150,7 @@ if (!window.THREE || !THREE.EffectComposer || !THREE.SSAOPass || !THREE.RoundedB
    Renderer / scene
    ============================================================ */
 const canvas = $('c');
+canvas.tabIndex = 0; canvas.style.outline = 'none';
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }); }
 catch (e) { fail('WebGL is not available in this browser.'); return; }
@@ -974,6 +980,50 @@ function buildRunner() {
 }
 
 /* ============================================================
+   Optional real character: runner.glb (Mixamo-style rig, clips named run/jump/roll/idle)
+   ============================================================ */
+function loadRunnerModel() {
+  return new Promise((res) => {
+    if (!THREE.GLTFLoader) { res(null); return; }
+    const q = new URLSearchParams(location.search).get('runner');
+    const url = q || (/claude/.test(location.hostname) ? null : 'runner.glb');
+    if (!url) { res(null); return; }
+    try { new THREE.GLTFLoader().load(url, (g) => res(g), undefined, () => res(null)); } catch (e) { res(null); }
+  });
+}
+function attachRunnerModel(gltf) {
+  if (!gltf || !gltf.scene) return;
+  const model = gltf.scene;
+  const box = new THREE.Box3().setFromObject(model);
+  const h = Math.max(0.01, box.max.y - box.min.y);
+  model.scale.setScalar(1.78 / h);
+  box.setFromObject(model);
+  model.position.y -= box.min.y;
+  model.position.x -= (box.min.x + box.max.x) / 2;
+  model.rotation.y = Math.PI;
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) if (m) { m.envMapIntensity = 0.6; } } });
+  const wrap = new THREE.Group(); wrap.position.y = -0.85; wrap.add(model);
+  runner.model.visible = false; runner.pivot.add(wrap);
+  rig.model = model; rig.mixer = new THREE.AnimationMixer(model);
+  const find = (re) => (gltf.animations || []).find((c) => re.test(c.name));
+  const clips = { run: find(/run|jog|sprint/i) || (gltf.animations || [])[0], jump: find(/jump|leap/i), roll: find(/roll|slide|dive/i), idle: find(/idle|stand/i) };
+  for (const k in clips) if (clips[k]) { rig.actions[k] = rig.mixer.clipAction(clips[k]); }
+  playRig('run');
+}
+function playRig(name) {
+  const a = rig.actions[name] || rig.actions.run; if (!a || a === rig.current) return;
+  a.reset().setEffectiveWeight(1).fadeIn(0.12).play();
+  if (rig.current) rig.current.fadeOut(0.12);
+  rig.current = a;
+}
+function setView(v) {
+  if (v === 'tp' && !rig.model) v = 'fp';
+  view = v; $('viewv').textContent = v === 'fp' ? 'FIRST PERSON' : 'CHASE CAM';
+  runner.pivot.visible = v === 'tp' && !!rig.model;
+  try { localStorage.setItem('ballastrun.view', v); } catch (e) { /* ignore */ }
+}
+
+/* ============================================================
    Dust motes
    ============================================================ */
 function buildDust() {
@@ -1057,8 +1107,11 @@ const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, c
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('ballastrun.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
 window.ballastRun = state;
+window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
 let lights, runner, dust;
+let view = 'fp';
+const rig = { model: null, mixer: null, actions: {}, current: null };
 const fmt = (n) => String(Math.floor(n)).padStart(6, '0');
 function updateHUD() { $('score').textContent = fmt(state.score); $('coins').textContent = String(state.coins); $('bestv').textContent = fmt(state.best); }
 
@@ -1076,8 +1129,9 @@ function resetWorld() {
 }
 function startRun() {
   audioInit(); resetWorld(); state.mode = 'run';
+  try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
-  $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on');
+  $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
   setTimeout(() => $('hint').classList.remove('on'), 4000);
 }
 function die(cause) {
@@ -1095,17 +1149,20 @@ function doLeft() { if (state.mode !== 'run' || player.stumble > 0.25) return; i
 function doRight() { if (state.mode !== 'run' || player.stumble > 0.25) return; if (player.lane < 2) { player.prevLane = player.lane; player.lane++; } }
 function doJump() { if (state.mode !== 'run') return; if (player.grounded && player.rolling <= 0) { player.vy = JUMP_V; player.grounded = false; sfxJump(); } }
 function doRoll() { if (state.mode !== 'run') return; if (player.grounded) { if (player.rolling <= 0) player.rolling = ROLL_TIME; } else player.fastFall = true; }
+const KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ']);
 window.addEventListener('keydown', (e) => {
+  if (KEYS.has(e.key)) e.preventDefault();
   if (e.repeat) return; const k = e.key;
   if (state.mode === 'idle' && (k === ' ' || k === 'Enter')) { e.preventDefault(); startRun(); return; }
   if (state.mode === 'dead' && (k === ' ' || k === 'Enter') && $('dead').classList.contains('on')) { e.preventDefault(); startRun(); return; }
+  if (k === 'v' || k === 'V') { setView(view === 'fp' ? 'tp' : 'fp'); return; }
   if (k === 'ArrowLeft' || k === 'a' || k === 'A') { e.preventDefault(); doLeft(); }
   else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); doRight(); }
   else if (k === 'ArrowUp' || k === 'w' || k === 'W' || k === ' ') { e.preventDefault(); doJump(); }
   else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); doRoll(); }
 });
 let touchStart = null;
-canvas.addEventListener('pointerdown', (e) => { touchStart = { x: e.clientX, y: e.clientY }; audioInit(); });
+canvas.addEventListener('pointerdown', (e) => { touchStart = { x: e.clientX, y: e.clientY }; audioInit(); try { canvas.focus({ preventScroll: true }); } catch (err) { /* ignore */ } });
 canvas.addEventListener('pointerup', (e) => {
   if (!touchStart) return;
   const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y; touchStart = null;
@@ -1115,6 +1172,7 @@ canvas.addEventListener('pointerup', (e) => {
 });
 $('btnStart').addEventListener('click', startRun);
 $('btnAgain').addEventListener('click', startRun);
+$('view').addEventListener('click', () => setView(view === 'fp' ? 'tp' : 'fp'));
 
 /* ============================================================
    Collision / floor
@@ -1130,9 +1188,10 @@ function floorAt(x, y, dt) {
       else if (t.moving) hit = { cause: 'HIT BY AN OUTBOUND TRAIN' };
       else if (zFront < 0.35 + state.speed * dt) hit = { cause: 'HIT A PARKED TRAIN', frontal: true };
       else hit = { cause: 'HIT A TRAIN', side: true, train: t };
-    } else if (t.hasRamp && zFront > pzF && zFront <= RAMP_LEN + pzF) {
-      const ry = clamp(TRAIN_TOP * (RAMP_LEN - zFront) / RAMP_LEN, 0, TRAIN_TOP);
-      if (y > ry - 1.6) floor = Math.max(floor, ry);
+    } else if (t.hasRamp && zFront < pzB && zFront >= -RAMP_LEN - pzF) {
+      // ramp runs from the train front (zFront, full height) back toward the player (zFront + RAMP_LEN, ground)
+      const ry = clamp(TRAIN_TOP * (RAMP_LEN + zFront + pzF) / RAMP_LEN, 0, TRAIN_TOP);
+      floor = Math.max(floor, ry);
     }
   }
   return { floor, hit };
@@ -1208,6 +1267,10 @@ function update(dt) {
   // ---- character animation
   const pv = runner.pivot, R = runner;
   pv.position.x = player.x;
+  if (rig.mixer) {
+    if (state.mode === 'dead') playRig('idle'); else if (player.rolling > 0) playRig('roll'); else if (!player.grounded) playRig('jump'); else playRig('run');
+    rig.mixer.update(dt * (state.mode === 'run' ? clamp(speed / 14, 0.8, 2.0) : 1));
+  }
   const setLeg = (leg, hip, knee) => { leg.root.rotation.x = hip; leg.joint.rotation.x = knee; };
   const setArm = (arm, sh, el) => { arm.root.rotation.x = sh; arm.joint.rotation.x = el; };
   if (state.mode === 'dead') {
@@ -1220,20 +1283,20 @@ function update(dt) {
     if (player.rolling > 0) {
       const t = 1 - player.rolling / ROLL_TIME;
       pv.rotation.x = -t * Math.PI * 2; pv.position.y = 0.55 + player.y;
-      setLeg(R.legL, -1.6, 2.2); setLeg(R.legR, -1.6, 2.2); setArm(R.armL, -1.2, -1.8); setArm(R.armR, -1.2, -1.8);
+      setLeg(R.legL, -1.6, -2.2); setLeg(R.legR, -1.6, -2.2); setArm(R.armL, -1.2, 1.8); setArm(R.armR, -1.2, 1.8);
     } else if (!player.grounded) {
       pv.rotation.x = -0.2 + clamp(-player.vy * 0.03, -0.25, 0.25);
       const k = Math.min(1, dt * 10);
-      setLeg(R.legL, lerp(R.legL.root.rotation.x, -1.1, k), lerp(R.legL.joint.rotation.x, 1.6, k)); setLeg(R.legR, lerp(R.legR.root.rotation.x, 0.3, k), lerp(R.legR.joint.rotation.x, 0.8, k));
-      setArm(R.armL, lerp(R.armL.root.rotation.x, -0.9, k), -1.5); setArm(R.armR, lerp(R.armR.root.rotation.x, -0.55, k), -1.5);
+      setLeg(R.legL, lerp(R.legL.root.rotation.x, -1.1, k), lerp(R.legL.joint.rotation.x, -1.6, k)); setLeg(R.legR, lerp(R.legR.root.rotation.x, 0.3, k), lerp(R.legR.joint.rotation.x, -0.8, k));
+      setArm(R.armL, lerp(R.armL.root.rotation.x, -0.9, k), 1.5); setArm(R.armR, lerp(R.armR.root.rotation.x, -0.55, k), 1.5);
     } else {
       pv.rotation.x = -0.2 - speed * 0.004;
       pv.position.y += Math.abs(Math.sin(p)) * 0.045;
       // hips swing legs, knee flexes during the forward swing
-      setLeg(R.legL, -sp * 0.85, 0.15 + 0.9 * Math.max(0, Math.sin(p + 1.3)));
-      setLeg(R.legR, -spn * 0.85, 0.15 + 0.9 * Math.max(0, Math.sin(p + Math.PI + 1.3)));
-      setArm(R.armL, sp * 0.8 - 0.25, -1.65 - sp * 0.25);
-      setArm(R.armR, spn * 0.8 - 0.25, -1.65 - spn * 0.25);
+      setLeg(R.legL, -sp * 0.85, -(0.15 + 0.95 * Math.max(0, Math.sin(p + 1.3))));
+      setLeg(R.legR, -spn * 0.85, -(0.15 + 0.95 * Math.max(0, Math.sin(p + Math.PI + 1.3))));
+      setArm(R.armL, sp * 0.8 - 0.25, 1.65 + sp * 0.25);
+      setArm(R.armR, spn * 0.8 - 0.25, 1.65 + spn * 0.25);
     }
     pv.rotation.z = (LANE_X[player.lane] - player.x) * -0.2 + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.12 : 0);
     R.torso.rotation.y = sp * 0.12; R.hood.rotation.y = -sp * 0.05;
@@ -1245,9 +1308,27 @@ function update(dt) {
   player.camX = lerp(player.camX, player.x * 0.6, Math.min(1, dt * 6));
   const shake = (player.stumble > 0 ? 0.05 : 0) + state.hitFlash * 0.12;
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
-  camera.position.set(player.camX + (Math.random() - 0.5) * shake, 2.75 + player.camY + bob + (Math.random() - 0.5) * shake, 5.5 - Math.min(1.0, speed * 0.02));
-  camera.lookAt(player.camX * 0.5, 1.35 + player.camY + Math.min(1.3, player.y * 0.35), -7);
-  camera.fov = 56 + speed * 0.24; camera.updateProjectionMatrix();
+  if (view === 'fp') {
+    const rolling = player.rolling > 0;
+    const eyeTarget = rolling ? 0.72 : 1.62;
+    player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
+    const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
+    const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
+    const lean = (LANE_X[player.lane] - player.x) * 0.09;
+    let ex = player.x + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
+    let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0);
+    let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
+    if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
+    camera.position.set(ex, ey, ez);
+    camera.lookAt(player.x + lean * 3, pitchY, -9);
+    camera.rotateZ(roll);
+    camera.fov = 68 + speed * 0.28;
+  } else {
+    camera.position.set(player.camX + (Math.random() - 0.5) * shake, 2.75 + player.camY + bob + (Math.random() - 0.5) * shake, 5.5 - Math.min(1.0, speed * 0.02));
+    camera.lookAt(player.camX * 0.5, 1.35 + player.camY + Math.min(1.3, player.y * 0.35), -7);
+    camera.fov = 56 + speed * 0.24;
+  }
+  camera.updateProjectionMatrix();
 
   lights.key.position.set(player.x + 4, 12, -9); lights.key.target.position.set(player.x, 0, -2);
 
@@ -1302,13 +1383,16 @@ async function boot() {
   const keys = ['nConcrete', 'nCracked', 'nBrushed', 'nRust', 'nFluting', 'nTile', 'nWeave', 'nCanvas', 'nDiamond', 'nNubs'];
   await Promise.all(keys.map((k) => loadNormal(k)));
   setProgress(0.3, 'LOADING LIGHT');
-  const hdri = await loadHDRI();
+  const [hdri, runnerGltf] = await Promise.all([loadHDRI(), loadRunnerModel()]);
   setProgress(0.5, 'LAYING TRACK');
   await new Promise((r) => setTimeout(r, 20));
   buildTextures(); buildMaterials(); buildGeometries();
   lights = buildEnvironment(hdri);
   for (let i = 0; i < SEG_COUNT; i++) segments.push(buildSegment());
   runner = buildRunner(); dust = buildDust();
+  attachRunnerModel(runnerGltf);
+  let savedView = 'fp'; try { savedView = localStorage.getItem('ballastrun.view') || 'fp'; } catch (e) { /* ignore */ }
+  setView(savedView === 'tp' ? 'tp' : 'fp');
   buildPost();
   resetWorld();
   window.addEventListener('resize', onResize);

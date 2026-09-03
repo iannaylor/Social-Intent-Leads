@@ -5,6 +5,17 @@ single HTML file. Open `index.html` in any modern browser (Chrome, Edge, Safari,
 Firefox) or serve the folder statically. No build step, no assets to download:
 every texture is generated procedurally on a canvas at load time.
 
+## View and character
+
+The game plays in first person by default, like the subway FPS it was inspired
+by, so the environment is the whole picture. The procedural stand-in runner is
+never shown. To get a third-person chase camera with a real character, put a
+rigged glTF binary named `runner.glb` next to `index.html` (or pass
+`?runner=URL`). Mixamo or Ready Player Me exports work: the loader scales the
+model to 1.78 m, faces it down the track, and picks animation clips whose names
+contain `run`, `jump`, `roll` and `idle`. Press V to switch cameras once it has
+loaded.
+
 ## Controls
 
 | Action        | Keyboard                 | Touch        |
@@ -13,6 +24,7 @@ every texture is generated procedurally on a canvas at load time.
 | Jump          | Up, W, Space             | Swipe up     |
 | Roll / drop   | Down, S                  | Swipe down   |
 | Start / retry | Space or Enter, button   | Tap          |
+| Camera        | V (with `runner.glb`)    |              |
 
 Jump the concrete hurdles, roll under the "LOW CLEARANCE" gates, change track
 around the fences. Parked trains can be ridden from a hazard-striped ramp.
