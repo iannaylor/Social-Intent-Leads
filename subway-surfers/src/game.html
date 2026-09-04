@@ -1206,14 +1206,22 @@ async function findPanos(lat, lon, token) {
 /* ---- Google Street View: five 90-degree views make a box around the player ---- */
 const GKEY = () => (window.INDI_CONFIG && window.INDI_CONFIG.googleKey) || new URLSearchParams(location.search).get('gkey') || '';
 async function gsvMeta(lat, lng, radius) {
-  const r = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat.toFixed(6)},${lng.toFixed(6)}&radius=${radius}&source=outdoor&key=${encodeURIComponent(GKEY())}`);
-  const j = await r.json();
-  if (j.status !== 'OK') { if (j.status && j.status !== 'ZERO_RESULTS') throw new Error('Street View: ' + j.status + (j.error_message ? ' (' + j.error_message + ')' : '')); return null; }
+  const url = `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat.toFixed(6)},${lng.toFixed(6)}&radius=${radius}&source=outdoor&key=${encodeURIComponent(GKEY())}`;
+  let r; try { r = await fetch(url); } catch (e) { throw new Error('Google Street View request blocked by the browser (network/CORS): ' + e.message); }
+  let j; try { j = await r.json(); } catch (e) { throw new Error('Google Street View returned HTTP ' + r.status + ' (not JSON)'); }
+  if (j.status !== 'OK') {
+    if (j.status && j.status !== 'ZERO_RESULTS') {
+      const hint = j.status === 'REQUEST_DENIED' ? ' Check the key: Street View Static API enabled, billing on, website restriction https://iannaylor.github.io/*.' : '';
+      throw new Error('Google Street View: ' + j.status + (j.error_message ? ' – ' + j.error_message : '') + hint);
+    }
+    return null;
+  }
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
+const GSV_RADIUS = 1500;
 async function gsvFind(lat, lng) {
-  const base = await gsvMeta(lat, lng, 500); if (!base) return null;
+  const base = await gsvMeta(lat, lng, GSV_RADIUS); if (!base) return null;
   const L = { lat: base.location.lat, lng: base.location.lng };
   const probes = await Promise.all([[45, 0], [0, 45], [-45, 0], [0, -45]].map(([n, e]) => { const q = moveLL(L.lat, L.lng, n, e); return gsvMeta(q.lat, q.lng, 30).catch(() => null); }));
   let best = null, bd = 0;
@@ -1231,7 +1239,7 @@ async function gsvNext(cur) {
 }
 const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/streetview?size=640x640&pano=${encodeURIComponent(pano)}&heading=${((heading % 360) + 360) % 360}&pitch=${pitch}&fov=90&key=${encodeURIComponent(GKEY())}`;
 function loadTex(url) {
-  return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('image blocked'))); });
+  return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('Street View image blocked by the browser (CORS) – ' + url.replace(/key=[^&]*/, 'key=…')))); });
 }
 function makeBox() {
   const g = new THREE.Group(), d = 100, geo = new THREE.PlaneGeometry(2 * d, 2 * d);
@@ -1307,7 +1315,7 @@ async function startStreet(place) {
       setStreetStatus('Finding Google Street View near ' + (place.name || 'you') + '…');
       const cur = await gsvFind(place.lat, place.lon);
       if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = 260; setStreetStatus('Street View found. Run!'); }
-      else gerr = 'No Street View within 500 m.';
+      else gerr = 'Google has no Street View within ' + GSV_RADIUS + ' m of ' + (place.name || 'here') + '.';
     } catch (e) { gerr = e.message; }
   }
   if (street.source !== 'google') {
@@ -1315,7 +1323,8 @@ async function startStreet(place) {
     try { if (token) panos = await findPanos(place.lat, place.lon, token); } catch (e) { gerr += ' ' + e.message; }
     street.panos = panos;
     if (panos.length) { await showPano(0, true); street.source = 'mapillary'; street.nextSwapD = 260; setStreetStatus((gerr ? gerr + ' ' : '') + 'Using ' + panos.length + ' Mapillary 360° photos' + (panos.distanceKm > 1.5 ? ' from ' + panos.distanceKm.toFixed(1) + ' km away' : '') + '. Run!', !!gerr); }
-    else { street.plainSky = true; setStreetStatus((gerr ? gerr + ' ' : '') + 'No street imagery found, running with a plain sky.', true); $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + ' · PLAIN SKY'; }
+    else { street.plainSky = true; setStreetStatus((gerr ? gerr + ' ' : '') + 'No street imagery found, running with a plain sky.', true); $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + ' · PLAIN SKY' + (gerr ? ' · ' + gerr.trim().slice(0, 110).toUpperCase() : ''); }
+    if (gerr) console.warn('[street]', gerr);
   }
 }
 function stopStreet() {
