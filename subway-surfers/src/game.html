@@ -76,6 +76,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   .street .fields{display:none}
   .street.on .fields{display:block}
   #err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-width:80vw;text-align:center;color:var(--ink);font-size:14px;line-height:1.5;display:none}
+  #build{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:10px;letter-spacing:.15em;color:var(--ink-dim);opacity:.45;pointer-events:none}
   #q{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:12px;letter-spacing:.2em;color:var(--ink-dim);opacity:.6;pointer-events:none}
   @media (max-width:520px){h1{font-size:44px}.plate{min-width:96px;padding:6px 10px 4px}.plate .val{font-size:20px}.rules{grid-template-columns:1fr}}
   @media (prefers-reduced-motion:reduce){.overlay,.plate,#hud,#hint{transition:none}}
@@ -91,6 +92,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 <div id="best" class="plate"><div class="lbl">BEST</div><div class="val" id="bestv">000000</div></div>
 <div id="hint">SWIPE OR ARROW KEYS · SPACE JUMP · DOWN ROLL</div>
 <div id="q"></div>
+<div id="build"></div>
 <div id="view" class="plate"><div class="lbl">VIEW · V</div><div class="val" id="viewv" style="font-size:16px">FIRST PERSON</div></div>
 
 <div id="start" class="overlay">
@@ -136,6 +138,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 <div id="err"></div>
 
 <!--ASSETS-->
+<script>document.getElementById('build').textContent = 'BUILD ' + (window.BUILD || 'dev');</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/fflate.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
@@ -895,8 +898,8 @@ function styleSegment(seg, n) {
   seg.styleIndex = n;
   if (street.active) {
     seg.kind = 'street'; seg.both.visible = false; seg.tun.visible = false; seg.sta.visible = false; seg.str.visible = true;
-    const photo = !!street.source;   // real imagery already shows the lamps, walls and hedges
-    seg.str.traverse((o) => { if (o.userData.wall) o.visible = !photo && (n % 3) !== 1; if (o.userData.hedge) o.visible = !photo && (n % 3) === 1; if (o.userData.furniture) o.visible = !photo; });
+    // street mode keeps only the tarmac, kerbs and pavements: the surrounding photos carry the lamps, walls and hedges
+    seg.str.traverse((o) => { if (o.userData.wall || o.userData.hedge || o.userData.furniture) o.visible = false; });
     return;
   }
   seg.both.visible = true; seg.str.visible = false;
@@ -1690,7 +1693,7 @@ function update(dt) {
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
   if (view === 'fp') {
     const rolling = player.rolling > 0;
-    const eyeBase = street.active && street.source ? 2.45 : 1.62;   // car-roof height to match the Street View photos
+    const eyeBase = street.active ? 2.45 : 1.62;   // car-roof height to match the Street View photos
     const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;

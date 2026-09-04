@@ -1,5 +1,6 @@
 // Builds ../index.html from ../src/game.html by inlining CC0 assets from @pmndrs/assets.
 // Usage: npm i @pmndrs/assets@1.7.0 && node tools/build.mjs   (run from subway-surfers/)
+import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -24,6 +25,8 @@ const ASSETS = {
   nNubs: uri('normals/0027.webp.js'),       // tactile paving
 };
 const src = readFileSync(join(here, '..', 'src', 'game.html'), 'utf8');
-const out = src.replace('<!--ASSETS-->', `<script>window.ASSETS=${JSON.stringify(ASSETS)};</script>`);
+const sha = (() => { try { return execSync('git rev-parse --short HEAD', { cwd: here }).toString().trim(); } catch { return 'local'; } })();
+const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' ' + sha;
+const out = src.replace('<!--ASSETS-->', `<script>window.BUILD=${JSON.stringify(stamp)};window.ASSETS=${JSON.stringify(ASSETS)};</script>`);
 writeFileSync(join(here, '..', 'index.html'), out);
 console.log('index.html written,', (out.length / 1048576).toFixed(2), 'MB');
