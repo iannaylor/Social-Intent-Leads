@@ -1156,7 +1156,7 @@ function setView(v) {
    every few hundred metres.
    ============================================================ */
 const STREET_COIN_SCALE = 0.8;
-const street = { active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
+const street = { seen: new Set(), pending: null, active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
 const streetEl = $('street');
 function streetToken() {
   const q = new URLSearchParams(location.search).get('mly'); if (q) return q;
@@ -1223,21 +1223,35 @@ async function gsvMeta(lat, lng, radius) {
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
-const GSV_RADIUS = 1500;
+const GSV_RADIUS = 1500, GSV_SWAP = 120;   // search radius for the first photo; metres of running between photos
+const angDiff = (a, b) => { const d = (((a - b) % 360) + 360) % 360; return d > 180 ? 360 - d : d; };
+const gsvPt = (m, heading) => ({ pano: m.pano_id, lat: m.location.lat, lng: m.location.lng, heading, date: m.date || '' });
+/* look `step` metres along `heading` from `from` for a different panorama that lies roughly ahead */
+async function gsvProbe(from, heading, step, radius, maxTurn, exclude) {
+  const q = moveLL(from.lat, from.lng, Math.cos(heading * Math.PI / 180) * step, Math.sin(heading * Math.PI / 180) * step);
+  const m = await gsvMeta(q.lat, q.lng, radius).catch(() => null);
+  if (!m || exclude.has(m.pano_id)) return null;
+  const L = { lat: m.location.lat, lng: m.location.lng }, b = bearing(from, L);
+  if (haversine(from, L) < 4 || angDiff(b, heading) > maxTurn) return null;
+  return gsvPt(m, b);
+}
 async function gsvFind(lat, lng) {
   const base = await gsvMeta(lat, lng, GSV_RADIUS); if (!base) return null;
-  const L = { lat: base.location.lat, lng: base.location.lng };
-  const probes = await Promise.all([[45, 0], [0, 45], [-45, 0], [0, -45]].map(([n, e]) => { const q = moveLL(L.lat, L.lng, n, e); return gsvMeta(q.lat, q.lng, 30).catch(() => null); }));
-  let best = null, bd = 0;
-  for (const p of probes) if (p && p.pano_id !== base.pano_id) { const d = haversine(L, { lat: p.location.lat, lng: p.location.lng }); if (d > bd) { bd = d; best = p; } }
-  const heading = best ? bearing(L, { lat: best.location.lat, lng: best.location.lng }) : 0;
-  return { pano: base.pano_id, lat: L.lat, lng: L.lng, heading, date: base.date || '' };
+  const cur = gsvPt(base, 0), skip = new Set([base.pano_id]);
+  // which way does the road run? look for neighbouring panoramas in rings around the first one and take the farthest
+  for (const [step, radius] of [[20, 12], [45, 25], [80, 40]]) {
+    const found = await Promise.all([0, 45, 90, 135, 180, 225, 270, 315].map((h) => gsvProbe(cur, h, step, radius, 180, skip)));
+    let best = null, bd = 0;
+    for (const f of found) if (f) { const d = haversine(cur, f); if (d > bd) { bd = d; best = f; } }
+    if (best) { cur.heading = best.heading; break; }
+  }
+  return cur;
 }
-async function gsvNext(cur) {
-  for (let step = 70; step <= 280; step += 70) {
-    const q = moveLL(cur.lat, cur.lng, Math.cos(cur.heading * Math.PI / 180) * step, Math.sin(cur.heading * Math.PI / 180) * step);
-    const m = await gsvMeta(q.lat, q.lng, 45).catch(() => null);
-    if (m && m.pano_id !== cur.pano) { const L = { lat: m.location.lat, lng: m.location.lng }; return { pano: m.pano_id, lat: L.lat, lng: L.lng, heading: bearing({ lat: cur.lat, lng: cur.lng }, L), date: m.date || '' }; }
+/* the next panorama along the same road: short hops first so bends are followed, wider ones for sparse coverage */
+async function gsvNext(cur, exclude) {
+  for (const [step, radius, maxTurn] of [[25, 12, 40], [15, 10, 45], [40, 16, 50], [60, 22, 60], [90, 30, 70], [20, 12, 100]]) {
+    const f = await gsvProbe(cur, cur.heading, step, radius, maxTurn, exclude);
+    if (f) return f;
   }
   return null;
 }
@@ -1258,17 +1272,32 @@ function makeBox() {
   g.userData.faces = { ahead, right, behind, left, up, down }; g.visible = false; scene.add(g); return g;
 }
 function setBoxOpacity(g, o) { for (const m of g.children) m.material.opacity = o; }
-async function gsvShow(cur, instant) {
-  const f = street.boxB.userData.faces, H = cur.heading;
-  const [ta, tr, tb, tl, tu] = await Promise.all([loadTex(gsvUrl(cur.pano, H, 0)), loadTex(gsvUrl(cur.pano, H + 90, 0)), loadTex(gsvUrl(cur.pano, H + 180, 0)), loadTex(gsvUrl(cur.pano, H + 270, 0)), loadTex(gsvUrl(cur.pano, H, 90))]);
-  if (!street.active) return;
-  const put = (m, t) => { m.material.map = t; m.material.needsUpdate = true; };
-  put(f.ahead, ta); put(f.right, tr); put(f.behind, tb); put(f.left, tl); put(f.up, tu);
+/* load a panorama's four visible faces (ahead, right, left, up) into a box; behind is never in view */
+async function gsvLoad(box, cur) {
+  const f = box.userData.faces, H = cur.heading;
+  const [ta, tr, tl, tu] = await Promise.all([loadTex(gsvUrl(cur.pano, H, 0)), loadTex(gsvUrl(cur.pano, H + 90, 0)), loadTex(gsvUrl(cur.pano, H + 270, 0)), loadTex(gsvUrl(cur.pano, H, 90))]);
+  const put = (m, t) => { if (m.material.map) m.material.map.dispose(); m.material.map = t; m.material.needsUpdate = true; };
+  put(f.ahead, ta); put(f.right, tr); put(f.left, tl); put(f.up, tu); f.behind.visible = false;
+}
+/* bring the panorama loaded in boxB into view */
+function gsvBegin(cur, instant) {
   const to = street.boxB, from = street.box;
   to.visible = true; setBoxOpacity(to, instant ? 1 : 0); street.fade = instant ? 1 : 0.0001;
   if (instant) { from.visible = false; street.box = to; street.boxB = from; }
-  street.gsv = cur;
+  street.gsv = cur; street.seen.add(cur.pano); street.pending = null;
   $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · GOOGLE STREET VIEW' + (cur.date ? ' ' + cur.date : '');
+}
+async function gsvShow(cur, instant) { await gsvLoad(street.boxB, cur); if (street.active) gsvBegin(cur, instant); }
+/* find and load the following panorama while the current one is on screen, so the swap is instant */
+function gsvPrefetch() {
+  const from = street.gsv, job = { ready: false, cur: null, dead: false };
+  street.pending = job;
+  gsvNext(from, street.seen).then(async (nxt) => {
+    if (!nxt) { job.dead = true; return; }
+    if (!street.active || street.pending !== job) return;
+    await gsvLoad(street.boxB, nxt);
+    if (street.pending === job) { job.cur = nxt; job.ready = true; }
+  }).catch(() => { if (street.pending === job) street.pending = null; });
 }
 function loadPanoTexture(im) {
   if (street.cache[im.id]) return street.cache[im.id];
@@ -1308,7 +1337,7 @@ async function startStreet(place) {
   setStreetStatus('Finding 360° photos near ' + (place.name || 'you') + '…');
   if (!street.sky) { street.sky = makeSky(); street.skyB = makeSky(); }
   if (!street.box) { street.box = makeBox(); street.boxB = makeBox(); }
-  street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = '';
+  street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = ''; street.seen = new Set(); street.pending = null;
   street.sky.visible = false; street.skyB.visible = false; street.box.visible = false; street.boxB.visible = false;
   street.active = true;
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
@@ -1318,7 +1347,7 @@ async function startStreet(place) {
     try {
       setStreetStatus('Finding Google Street View near ' + (place.name || 'you') + '…');
       const cur = await gsvFind(place.lat, place.lon);
-      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = 260; setStreetStatus('Street View found. Run!'); }
+      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; setStreetStatus('Street View found. Run!'); }
       else gerr = 'Google has no Street View within ' + GSV_RADIUS + ' m of ' + (place.name || 'here') + '.';
     } catch (e) { gerr = e.message; }
   }
@@ -1360,16 +1389,15 @@ function streetUpdate(dt) {
   if (street.sky) { street.sky.position.set(camera.position.x, camera.position.y - 1.2, camera.position.z); street.skyB.position.copy(street.sky.position); }
   if (street.box) { street.box.position.set(camera.position.x, camera.position.y, camera.position.z); street.boxB.position.copy(street.box.position); }
   if (street.fade > 0 && street.fade < 1) {
-    street.fade = Math.min(1, street.fade + dt / 1.6);
+    street.fade = Math.min(1, street.fade + dt / 1.1);
     if (street.source === 'google') { setBoxOpacity(street.boxB, street.fade); if (street.fade >= 1) { const t = street.box; street.box.visible = false; street.box = street.boxB; street.boxB = t; setBoxOpacity(street.boxB, 0); } }
     else { street.skyB.material.opacity = street.fade; if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; } }
   }
-  if (state.mode === 'run' && state.traveled - street.runStart > street.nextSwapD && street.fade >= 1 && !street.loading) {
-    street.nextSwapD += 260;
-    if (street.source === 'google' && street.gsv) {
-      street.loading = true;
-      gsvNext(street.gsv).then((nxt) => { if (nxt && street.active) return gsvShow(nxt, false); }).catch(() => {}).finally(() => { street.loading = false; });
-    } else if (street.panos.length > 1) showPano((street.panoIdx + 1) % street.panos.length, false);
+  if (street.source === 'google' && street.gsv) {
+    if (!street.pending && street.fade >= 1) gsvPrefetch();
+    if (state.mode === 'run' && state.traveled - street.runStart > street.nextSwapD && street.fade >= 1 && street.pending && street.pending.ready) { street.nextSwapD += GSV_SWAP; gsvBegin(street.pending.cur, false); }
+  } else if (state.mode === 'run' && state.traveled - street.runStart > street.nextSwapD && street.fade >= 1 && street.panos.length > 1) {
+    street.nextSwapD += 260; showPano((street.panoIdx + 1) % street.panos.length, false);
   }
   for (const pl of lights.lampLights) pl.intensity = 0;
 }
@@ -1463,7 +1491,7 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
 const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
-window.ballastRun = state;
+window.ballastRun = state; window.indiStreet = street;
 window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
 let lights, runner, dust;
@@ -1503,7 +1531,7 @@ async function startRun() {
 }
 function beginRun() {
   audioInit(); resetWorld(); state.mode = 'run';
-  if (street.active) { street.runStart = state.traveled; street.nextSwapD = 260; state.spawnCursor = state.traveled + 110; }
+  if (street.active) { street.runStart = state.traveled; street.nextSwapD = street.source === 'google' ? GSV_SWAP : 260; state.spawnCursor = state.traveled + 110; }
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
   $('hud').classList.add('on'); $('best').classList.add('on'); $('hint').classList.add('on'); if (rig.model) $('view').classList.add('on');
@@ -1693,7 +1721,7 @@ function update(dt) {
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
   if (view === 'fp') {
     const rolling = player.rolling > 0;
-    const eyeBase = street.active ? 2.45 : 1.62;   // car-roof height to match the Street View photos
+    const eyeBase = street.active ? 3.0 : 1.62;   // car-roof height to match the Street View photos
     const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
