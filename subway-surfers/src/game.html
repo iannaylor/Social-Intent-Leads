@@ -615,6 +615,7 @@ function buildMaterials() {
   M.puddle = std({ color: 0x05070a, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.8, envMapIntensity: 1.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
   M.asphalt = std({ map: T.asphalt, color: 0x8e8e90, roughness: 0.95, normalMap: nmap('nConcrete', [2, 8]), normalScale: new THREE.Vector2(0.5, 0.5), envMapIntensity: 0.25 });
   M.kerb = std({ color: 0xa9a49c, map: T.concrete, roughness: 0.9, envMapIntensity: 0.3 });
+  M.kerbDark = std({ color: 0x6a6660, map: T.concrete, roughness: 0.95, envMapIntensity: 0.2 });
   M.paving = std({ map: T.paving, color: 0xa8a49c, roughness: 0.9, normalMap: nmap('nConcrete', [1.6, 25]), normalScale: new THREE.Vector2(0.5, 0.5), envMapIntensity: 0.3 });
   M.hedge = std({ map: T.hedge, roughness: 1, envMapIntensity: 0.15 });
   M.grime = std({ map: T.grime, transparent: true, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, envMapIntensity: 0 });
@@ -876,10 +877,10 @@ function buildSegment() {
   }
   // ---- street variant: tarmac, kerbs, pavements, walls and hedges, lamp posts, bins
   const str = new THREE.Group(); root.add(str);
-  const road = mesh(new THREE.PlaneGeometry(10.4, SEG_LEN), M.asphalt, false, true); road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);
+  const road = mesh(new THREE.PlaneGeometry(7.8, SEG_LEN), M.asphalt, false, true); road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);   // a UK lane, not a dual carriageway
   for (const side of [-1, 1]) {
-    const kerb = mesh(new THREE.BoxGeometry(0.25, 0.16, SEG_LEN), M.kerb, true, true); kerb.position.set(side * 5.3, 0.08, 0); str.add(kerb);
-    const pave = mesh(new THREE.BoxGeometry(2.6, 0.14, SEG_LEN), M.paving, true, true); pave.position.set(side * 6.7, 0.07, 0); str.add(pave);
+    const kerb = mesh(new THREE.BoxGeometry(0.3, 0.1, SEG_LEN), M.kerbDark, true, true); kerb.position.set(side * 4.0, 0.05, 0); str.add(kerb);
+    const pave = mesh(new THREE.BoxGeometry(2.6, 0.14, SEG_LEN), M.paving, true, true); pave.position.set(side * 5.5, 0.07, 0); pave.userData.furniture = true; str.add(pave);   // the photo carries the real pavement
     const edge = mesh(new THREE.BoxGeometry(0.4, 0.9, SEG_LEN), M.brickWall, true, true); edge.position.set(side * 8.1, 0.45, 0); edge.userData.wall = true; str.add(edge);
     const hedge = mesh(new THREE.BoxGeometry(0.9, 1.5, SEG_LEN), M.hedge, true, true); hedge.position.set(side * 8.4, 0.75, 0); hedge.userData.hedge = true; str.add(hedge);
     for (let z = -SEG_LEN / 2 + (side < 0 ? 4 : 14); z < SEG_LEN / 2; z += 20) {
@@ -1224,8 +1225,8 @@ async function gsvMeta(lat, lng, radius) {
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
-const GSV_RADIUS = 1500, GSV_SWAP = 120;   // search radius for the first photo; metres of running between photos
-const GSV_LIFT = (() => { const v = parseFloat(new URLSearchParams(location.search).get('lift')); return isNaN(v) ? 16 : v; })();   // metres the photo is raised above the eye; ?lift=N to tune
+const GSV_RADIUS = 1500, GSV_SWAP = 150;   // search radius for the first photo; metres of running between photos
+const GSV_LIFT = (() => { const v = parseFloat(new URLSearchParams(location.search).get('lift')); return isNaN(v) ? 0 : v; })();   // metres the photo is raised above the eye (0 keeps both roads' vanishing points together); ?lift=N to experiment
 const angDiff = (a, b) => { const d = (((a - b) % 360) + 360) % 360; return d > 180 ? 360 - d : d; };
 const gsvPt = (m, heading) => ({ pano: m.pano_id, lat: m.location.lat, lng: m.location.lng, heading, date: m.date || '' });
 /* look `step` metres along `heading` from `from` for a different panorama that lies roughly ahead */
@@ -1283,17 +1284,47 @@ function makeBox() {
   const behind = mk(); behind.position.z = d; behind.rotation.y = Math.PI;
   const left = mk(); left.position.x = -d; left.rotation.y = Math.PI / 2;
   const up = mk(); up.position.y = d; up.rotation.x = Math.PI / 2;          // image top edge = behind
-  const down = mk(); down.position.y = -d; down.rotation.x = -Math.PI / 2; down.material.color.setHex(0x3a3a3a);
+  const down = mk(); down.position.y = -d; down.rotation.x = -Math.PI / 2; down.material.color.setHex(0x2b2b2d);
   for (const m of [ahead, right, behind, left, up, down]) { m.renderOrder = -10; m.frustumCulled = false; g.add(m); }
   g.userData.faces = { ahead, right, behind, left, up, down }; g.visible = false; scene.add(g); return g;
 }
 function setBoxOpacity(g, o) { for (const m of g.children) m.material.opacity = o; }
+/* Read the road out of the "ahead" photo: grey, low-saturation pixels in two bands below the horizon give the road's
+   centre near and far; the line through them meets the horizon at the road's vanishing point. Returns the yaw
+   (degrees, + = right) between the photo's heading and the road, or null if no road could be made out. */
+function roadYaw(img) {
+  const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d'); let d;
+  try { g.drawImage(img, 0, 0, N, N); d = g.getImageData(0, 0, N, N).data; } catch (e) { return null; }
+  const grey = (i) => { const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b); return mx - mn < 34 && mx > 40 && mx < 225; };
+  const centreAt = (y0, y1) => {
+    const score = new Float32Array(N);
+    for (let y = y0; y < y1; y++) for (let x = 0; x < N; x++) if (grey((y * N + x) * 4)) score[x]++;
+    const thr = (y1 - y0) * 0.55; let best = null, run = 0, start = 0;
+    for (let x = 0; x <= N; x++) {
+      if (x < N && score[x] >= thr) { if (!run) start = x; run++; }
+      else { if (run > (best ? best.len : 0)) best = { len: run, c: start + run / 2 }; run = 0; }
+    }
+    return best && best.len >= N * 0.12 ? best.c : null;
+  };
+  const yN = Math.round(N * 0.78), yF = Math.round(N * 0.60);
+  const near = centreAt(yN, Math.round(N * 0.90)), far = centreAt(yF, Math.round(N * 0.68));
+  if (near === null || far === null) return null;
+  const cN = (yN + N * 0.90) / 2, cF = (yF + N * 0.68) / 2;
+  const vx = near + (far - near) / (cF - cN) * (N / 2 - cN);           // extrapolate the centre line up to the horizon row
+  const yaw = Math.atan((vx - N / 2) / (N / 2)) * 180 / Math.PI;      // 90-degree field: half the width is the focal length
+  return Math.abs(yaw) > 30 ? null : yaw;
+}
 /* load a panorama's four visible faces (ahead, right, left, up) into a box; behind is never in view */
 async function gsvLoad(box, cur) {
   const f = box.userData.faces, H = cur.heading;
   const [ta, tr, tl, tu] = await Promise.all([loadTex(gsvUrl(cur.pano, H, 0)), loadTex(gsvUrl(cur.pano, H + 90, 0)), loadTex(gsvUrl(cur.pano, H + 270, 0)), loadTex(gsvUrl(cur.pano, H, 90))]);
   const put = (m, t) => { if (m.material.map) m.material.map.dispose(); m.material.map = t; m.material.needsUpdate = true; };
   put(f.ahead, ta); put(f.right, tr); put(f.left, tl); put(f.up, tu); f.behind.visible = false;
+  // turn the photo so its road vanishes straight ahead, and carry the correction into the heading used for the next hop
+  const yaw = roadYaw(ta.image);
+  cur.yaw = yaw || 0; box.rotation.y = (yaw || 0) * Math.PI / 180;
+  if (yaw) cur.heading += yaw;
 }
 /* bring the panorama loaded in boxB into view */
 function gsvBegin(cur, instant) {
@@ -1747,7 +1778,7 @@ function update(dt) {
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
   if (view === 'fp') {
     const rolling = player.rolling > 0;
-    const eyeBase = street.active ? 3.0 : 1.62;   // car-roof height to match the Street View photos
+    const eyeBase = street.active ? 2.6 : 1.62;   // Street View car camera height, so the photo's ground and the game's ground coincide
     const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
