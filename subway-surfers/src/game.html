@@ -1220,10 +1220,12 @@ async function gsvMeta(lat, lng, radius) {
     }
     return null;
   }
+  if (j.copyright && !/google/i.test(j.copyright)) return null;   // user photospheres are not on the road
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
 const GSV_RADIUS = 1500, GSV_SWAP = 120;   // search radius for the first photo; metres of running between photos
+const GSV_LIFT = (() => { const v = parseFloat(new URLSearchParams(location.search).get('lift')); return isNaN(v) ? 16 : v; })();   // metres the photo is raised above the eye; ?lift=N to tune
 const angDiff = (a, b) => { const d = (((a - b) % 360) + 360) % 360; return d > 180 ? 360 - d : d; };
 const gsvPt = (m, heading) => ({ pano: m.pano_id, lat: m.location.lat, lng: m.location.lng, heading, date: m.date || '' });
 /* look `step` metres along `heading` from `from` for a different panorama that lies roughly ahead */
@@ -1238,22 +1240,36 @@ async function gsvProbe(from, heading, step, radius, maxTurn, exclude) {
 async function gsvFind(lat, lng) {
   const base = await gsvMeta(lat, lng, GSV_RADIUS); if (!base) return null;
   const cur = gsvPt(base, 0), skip = new Set([base.pano_id]);
-  // which way does the road run? look for neighbouring panoramas in rings around the first one and take the farthest
+  // which way does the road run? look for neighbouring panoramas in rings around the first one; the farthest is
+  // "ahead", one roughly opposite is "behind", and the line between them is the road direction here
   for (const [step, radius] of [[20, 12], [45, 25], [80, 40]]) {
-    const found = await Promise.all([0, 45, 90, 135, 180, 225, 270, 315].map((h) => gsvProbe(cur, h, step, radius, 180, skip)));
-    let best = null, bd = 0;
-    for (const f of found) if (f) { const d = haversine(cur, f); if (d > bd) { bd = d; best = f; } }
-    if (best) { cur.heading = best.heading; break; }
+    const found = (await Promise.all([0, 45, 90, 135, 180, 225, 270, 315].map((h) => gsvProbe(cur, h, step, radius, 180, skip)))).filter(Boolean);
+    if (!found.length) continue;
+    found.sort((a, b) => haversine(cur, b) - haversine(cur, a));
+    const ahead = found[0], behind = found.find((f) => angDiff(f.heading, ahead.heading) > 120);
+    cur.heading = behind ? bearing(behind, ahead) : ahead.heading;
+    ahead.heading = cur.heading; cur.next = ahead;
+    break;
   }
   return cur;
 }
-/* the next panorama along the same road: short hops first so bends are followed, wider ones for sparse coverage */
+/* the next panorama along the same road: short hops first so bends are followed, wider ones for sparse coverage.
+   Its heading is the bearing from the current photo to the one after it, i.e. the road direction at the new photo. */
 async function gsvNext(cur, exclude) {
-  for (const [step, radius, maxTurn] of [[25, 12, 40], [15, 10, 45], [40, 16, 50], [60, 22, 60], [90, 30, 70], [20, 12, 100]]) {
-    const f = await gsvProbe(cur, cur.heading, step, radius, maxTurn, exclude);
-    if (f) return f;
-  }
-  return null;
+  const hop = async (from, heading, skip) => {
+    for (const [step, radius, maxTurn] of [[25, 12, 40], [15, 10, 45], [40, 16, 50], [60, 22, 60], [90, 30, 70], [20, 12, 100]]) {
+      const f = await gsvProbe(from, heading, step, radius, maxTurn, skip);
+      if (f) return f;
+    }
+    return null;
+  };
+  const nxt = cur.next && !exclude.has(cur.next.pano) ? cur.next : await hop(cur, cur.heading, exclude);
+  if (!nxt) return null;
+  const skip = new Set([...exclude, cur.pano, nxt.pano]);
+  const after = await hop(nxt, bearing(cur, nxt), skip);
+  if (after) { nxt.heading = bearing(cur, after); after.heading = bearing(nxt, after); nxt.next = after; }
+  else nxt.heading = bearing(cur, nxt);
+  return nxt;
 }
 const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/streetview?size=640x640&pano=${encodeURIComponent(pano)}&heading=${((heading % 360) + 360) % 360}&pitch=${pitch}&fov=90&key=${encodeURIComponent(GKEY())}`;
 function loadTex(url) {
@@ -1284,6 +1300,7 @@ function gsvBegin(cur, instant) {
   const to = street.boxB, from = street.box;
   to.visible = true; setBoxOpacity(to, instant ? 1 : 0); street.fade = instant ? 1 : 0.0001;
   if (instant) { from.visible = false; street.box = to; street.boxB = from; }
+  street.outDrift = street.drift || 0; street.hop = (street.pending && street.pending.hop) || street.hop || 25;
   street.gsv = cur; street.seen.add(cur.pano); street.pending = null;
   $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · GOOGLE STREET VIEW' + (cur.date ? ' ' + cur.date : '');
 }
@@ -1296,7 +1313,7 @@ function gsvPrefetch() {
     if (!nxt) { job.dead = true; return; }
     if (!street.active || street.pending !== job) return;
     await gsvLoad(street.boxB, nxt);
-    if (street.pending === job) { job.cur = nxt; job.ready = true; }
+    if (street.pending === job) { job.cur = nxt; job.hop = Math.min(45, Math.max(10, haversine(from, nxt))); job.ready = true; }
   }).catch(() => { if (street.pending === job) street.pending = null; });
 }
 function loadPanoTexture(im) {
@@ -1387,9 +1404,18 @@ function streetUpdate(dt) {
   if (!street.active) return;
   // sky follows the eye so it reads as infinitely far
   if (street.sky) { street.sky.position.set(camera.position.x, camera.position.y - 1.2, camera.position.z); street.skyB.position.copy(street.sky.position); }
-  if (street.box) { street.box.position.set(camera.position.x, camera.position.y, camera.position.z); street.boxB.position.copy(street.box.position); }
+  if (street.box) {
+    // the photo is lifted so the game road sits down in the picture, and the eye drifts forward through the box
+    // between photos so the picture approaches the way the next one will look; the outgoing photo keeps its drift
+    const hop = (street.pending && street.pending.hop) || street.hop || 25;
+    const frac = state.mode === 'run' ? clamp((state.traveled - street.runStart - (street.nextSwapD - GSV_SWAP)) / GSV_SWAP, 0, 1) : 0;
+    street.drift = hop * frac;
+    const fading = street.fade > 0 && street.fade < 1;
+    street.box.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + (fading ? street.outDrift : street.drift));
+    street.boxB.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + street.drift);
+  }
   if (street.fade > 0 && street.fade < 1) {
-    street.fade = Math.min(1, street.fade + dt / 1.1);
+    street.fade = Math.min(1, street.fade + dt / 0.7);
     if (street.source === 'google') { setBoxOpacity(street.boxB, street.fade); if (street.fade >= 1) { const t = street.box; street.box.visible = false; street.box = street.boxB; street.boxB = t; setBoxOpacity(street.boxB, 0); } }
     else { street.skyB.material.opacity = street.fade; if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; } }
   }
