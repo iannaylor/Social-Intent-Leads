@@ -1157,7 +1157,7 @@ function setView(v) {
    every few hundred metres.
    ============================================================ */
 const STREET_COIN_SCALE = 0.8;
-const street = { seen: new Set(), pending: null, active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
+const street = { linked: false, seen: new Set(), pending: null, active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
 const streetEl = $('street');
 function streetToken() {
   const q = new URLSearchParams(location.search).get('mly'); if (q) return q;
@@ -1272,6 +1272,50 @@ async function gsvNext(cur, exclude) {
   else nxt.heading = bearing(cur, nxt);
   return nxt;
 }
+/* Google's Maps JavaScript API knows, for every panorama, the direction the car was facing and the exact links to
+   the neighbouring panoramas along the road. That replaces guessing the heading from positions. */
+let gmapsPromise = null;
+function loadGmaps() {
+  if (gmapsPromise) return gmapsPromise;
+  gmapsPromise = new Promise((res, rej) => {
+    if (window.google && google.maps && google.maps.StreetViewService) { res(); return; }
+    window.__indiGmaps = () => res();
+    window.gm_authFailure = () => rej(new Error('Google rejected the key for the Maps JavaScript API (enable it for the key, and allow this site)'));
+    const sc = document.createElement('script');
+    sc.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GKEY()) + '&v=weekly&loading=async&callback=__indiGmaps';
+    sc.onerror = () => rej(new Error('Maps JavaScript API failed to load'));
+    document.head.appendChild(sc);
+    setTimeout(() => rej(new Error('Maps JavaScript API timed out')), 15000);
+  });
+  return gmapsPromise;
+}
+async function gsvData(req) {
+  const { data } = await new google.maps.StreetViewService().getPanorama(req);
+  const ll = data.location.latLng;
+  return { pano: data.location.pano, lat: ll.lat(), lng: ll.lng(), center: data.tiles.centerHeading, heading: data.tiles.centerHeading,
+    links: (data.links || []).map((l) => ({ heading: l.heading, pano: l.pano })), date: data.imageDate || '', nextPano: null };
+}
+/* the link that best continues in direction `want`; links to photos already shown count as a last resort */
+const meanAngle = (a, b) => { const r = Math.PI / 180; return ((Math.atan2(Math.sin(a * r) + Math.sin(b * r), Math.cos(a * r) + Math.cos(b * r)) / r) + 360) % 360; };
+function chooseLink(p, want, exclude) {
+  let best = null, bd = 1e9;
+  for (const l of p.links) { const d = angDiff(l.heading, want) + (exclude.has(l.pano) ? 1000 : 0); if (d < bd) { bd = d; best = l; } }
+  return best;
+}
+async function gsvFindLinked(lat, lng) {
+  const p = await gsvData({ location: { lat, lng }, radius: GSV_RADIUS, source: google.maps.StreetViewSource.OUTDOOR, preference: google.maps.StreetViewPreference.NEAREST });
+  const l = chooseLink(p, p.center, new Set());        // set off the way the car was driving
+  p.linkOut = l ? l.heading : null; p.heading = p.center; p.nextPano = l ? l.pano : null;   // the car's own facing is the road direction here
+  return p;
+}
+async function gsvNextLinked(cur, exclude) {
+  if (!cur.nextPano) return null;
+  const p = await gsvData({ pano: cur.nextPano });
+  const l = chooseLink(p, cur.linkOut || cur.heading, new Set([...exclude, cur.pano]));   // keep going the same way through bends and junctions
+  // face along the road's tangent here: halfway between the way we arrived and the way we leave
+  p.linkOut = l ? l.heading : null; p.heading = l ? meanAngle(cur.linkOut || cur.heading, l.heading) : (cur.linkOut || cur.heading); p.nextPano = l ? l.pano : null;
+  return p;
+}
 const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/streetview?size=640x640&pano=${encodeURIComponent(pano)}&heading=${((heading % 360) + 360) % 360}&pitch=${pitch}&fov=90&key=${encodeURIComponent(GKEY())}`;
 function loadTex(url) {
   return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('Street View image blocked by the browser (CORS) – ' + url.replace(/key=[^&]*/, 'key=…')))); });
@@ -1322,9 +1366,9 @@ async function gsvLoad(box, cur) {
   const put = (m, t) => { if (m.material.map) m.material.map.dispose(); m.material.map = t; m.material.needsUpdate = true; };
   put(f.ahead, ta); put(f.right, tr); put(f.left, tl); put(f.up, tu); f.behind.visible = false;
   // turn the photo so its road vanishes straight ahead, and carry the correction into the heading used for the next hop
-  const yaw = roadYaw(ta.image);
-  cur.yaw = yaw || 0; box.rotation.y = (yaw || 0) * Math.PI / 180;
-  if (yaw) cur.heading += yaw;
+  const yaw = street.linked ? null : roadYaw(ta.image);
+  cur.yaw = yaw ? clamp(yaw, -12, 12) : 0; box.rotation.y = cur.yaw * Math.PI / 180;
+  if (cur.yaw) cur.heading += cur.yaw;
 }
 /* bring the panorama loaded in boxB into view */
 function gsvBegin(cur, instant) {
@@ -1340,7 +1384,7 @@ async function gsvShow(cur, instant) { await gsvLoad(street.boxB, cur); if (stre
 function gsvPrefetch() {
   const from = street.gsv, job = { ready: false, cur: null, dead: false };
   street.pending = job;
-  gsvNext(from, street.seen).then(async (nxt) => {
+  (street.linked ? gsvNextLinked(from, street.seen) : gsvNext(from, street.seen)).then(async (nxt) => {
     if (!nxt) { job.dead = true; return; }
     if (!street.active || street.pending !== job) return;
     await gsvLoad(street.boxB, nxt);
@@ -1394,7 +1438,10 @@ async function startStreet(place) {
   if (GKEY()) {
     try {
       setStreetStatus('Finding Google Street View near ' + (place.name || 'you') + '…');
-      const cur = await gsvFind(place.lat, place.lon);
+      let cur = null;
+      try { await loadGmaps(); cur = await gsvFindLinked(place.lat, place.lon); street.linked = true; }
+      catch (e) { street.linked = false; console.warn('[street] linked lookup failed, probing instead:', e.message); }
+      if (!cur) cur = await gsvFind(place.lat, place.lon);
       if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; setStreetStatus('Street View found. Run!'); }
       else gerr = 'Google has no Street View within ' + GSV_RADIUS + ' m of ' + (place.name || 'here') + '.';
     } catch (e) { gerr = e.message; }

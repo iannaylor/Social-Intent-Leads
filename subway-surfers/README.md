@@ -22,9 +22,13 @@ Tick **STREET MODE** on the start card, type a postcode or address (or press
 MY LOCATION), and the run moves from the tunnel onto a real 3D street: tarmac
 with markings, kerbs, pavements, garden walls and hedges, lamp posts, bins and
 parked cars as lane blockers. Around it, real photos of the chosen area form the
-sky and skyline: Google Street View is used first (five Street View Static API
-views of the nearest panorama, mapped onto a box around the camera, stepping to
-the next panorama along the road every 260 m with a cross-fade). If no Google
+sky and skyline: Google Street View is used first. The Maps JavaScript API's
+Street View service gives each panorama's true facing and its links to the
+neighbouring panoramas, so the run follows the road exactly; four Street View
+Static API views of each panorama (ahead, left, right, up) are mapped onto a box
+around the camera, and the picture drifts forward and cross-fades to the next
+panorama every 150 m of running. If the JavaScript API is unavailable the game
+falls back to probing the Static API's metadata for nearby panoramas. If no Google
 key is configured, 360° photos from [Mapillary](https://www.mapillary.com) are
 used instead. Places with no coverage at all run with a plain sky and say so.
 
