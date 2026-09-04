@@ -880,12 +880,12 @@ function buildSegment() {
     const edge = mesh(new THREE.BoxGeometry(0.4, 0.9, SEG_LEN), M.brickWall, true, true); edge.position.set(side * 8.1, 0.45, 0); edge.userData.wall = true; str.add(edge);
     const hedge = mesh(new THREE.BoxGeometry(0.9, 1.5, SEG_LEN), M.hedge, true, true); hedge.position.set(side * 8.4, 0.75, 0); hedge.userData.hedge = true; str.add(hedge);
     for (let z = -SEG_LEN / 2 + (side < 0 ? 4 : 14); z < SEG_LEN / 2; z += 20) {
-      const post = mesh(new THREE.CylinderGeometry(0.07, 0.1, 6, 10), M.steelDark, true, true); post.position.set(side * 5.9, 3, z); str.add(post);
-      const arm = mesh(new THREE.BoxGeometry(1.2, 0.08, 0.1), M.steelDark, true, false); arm.position.set(side * 5.3, 5.9, z); str.add(arm);
-      const lamp = mesh(new THREE.BoxGeometry(0.5, 0.14, 0.26), M.lampHousing, true, false); lamp.position.set(side * 4.8, 5.85, z); str.add(lamp);
+      const post = mesh(new THREE.CylinderGeometry(0.07, 0.1, 6, 10), M.steelDark, true, true); post.position.set(side * 5.9, 3, z); post.userData.furniture = true; str.add(post);
+      const arm = mesh(new THREE.BoxGeometry(1.2, 0.08, 0.1), M.steelDark, true, false); arm.position.set(side * 5.3, 5.9, z); arm.userData.furniture = true; str.add(arm);
+      const lamp = mesh(new THREE.BoxGeometry(0.5, 0.14, 0.26), M.lampHousing, true, false); lamp.position.set(side * 4.8, 5.85, z); lamp.userData.furniture = true; str.add(lamp);
     }
-    const bin = mesh(new THREE.CylinderGeometry(0.28, 0.25, 0.9, 12), M.paint, true, true); bin.position.set(side * 6.2, 0.59, rand(-SEG_LEN / 2 + 2, SEG_LEN / 2 - 2)); str.add(bin);
-    const bollard = mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.9, 10), M.steelDark, true, true); bollard.position.set(side * 5.7, 0.55, rand(-SEG_LEN / 2 + 2, SEG_LEN / 2 - 2)); str.add(bollard);
+    const bin = mesh(new THREE.CylinderGeometry(0.28, 0.25, 0.9, 12), M.paint, true, true); bin.position.set(side * 6.2, 0.59, rand(-SEG_LEN / 2 + 2, SEG_LEN / 2 - 2)); bin.userData.furniture = true; str.add(bin);
+    const bollard = mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.9, 10), M.steelDark, true, true); bollard.position.set(side * 5.7, 0.55, rand(-SEG_LEN / 2 + 2, SEG_LEN / 2 - 2)); bollard.userData.furniture = true; str.add(bollard);
   }
   const seg = { root, both, tun, sta, str, tunLamps, staLamps, graf, d0: 0, kind: 'tunnel', styleIndex: 0 };
   scene.add(root);
@@ -895,7 +895,8 @@ function styleSegment(seg, n) {
   seg.styleIndex = n;
   if (street.active) {
     seg.kind = 'street'; seg.both.visible = false; seg.tun.visible = false; seg.sta.visible = false; seg.str.visible = true;
-    seg.str.traverse((o) => { if (o.userData.wall) o.visible = (n % 3) !== 1; if (o.userData.hedge) o.visible = (n % 3) === 1; });
+    const photo = !!street.source;   // real imagery already shows the lamps, walls and hedges
+    seg.str.traverse((o) => { if (o.userData.wall) o.visible = !photo && (n % 3) !== 1; if (o.userData.hedge) o.visible = !photo && (n % 3) === 1; if (o.userData.furniture) o.visible = !photo; });
     return;
   }
   seg.both.visible = true; seg.str.visible = false;
@@ -1326,6 +1327,7 @@ async function startStreet(place) {
     else { street.plainSky = true; setStreetStatus((gerr ? gerr + ' ' : '') + 'No street imagery found, running with a plain sky.', true); $('q').textContent = 'STREET · ' + (place.name || 'HERE').toUpperCase() + ' · PLAIN SKY' + (gerr ? ' · ' + gerr.trim().slice(0, 110).toUpperCase() : ''); }
     if (gerr) console.warn('[street]', gerr);
   }
+  for (const sg of segments) styleSegment(sg, sg.styleIndex);
 }
 function stopStreet() {
   if (!street.active) return;
@@ -1353,7 +1355,7 @@ function streetUpdate(dt) {
   if (!street.active) return;
   // sky follows the eye so it reads as infinitely far
   if (street.sky) { street.sky.position.set(camera.position.x, camera.position.y - 1.2, camera.position.z); street.skyB.position.copy(street.sky.position); }
-  if (street.box) { street.box.position.set(camera.position.x, camera.position.y - 0.9, camera.position.z); street.boxB.position.copy(street.box.position); }
+  if (street.box) { street.box.position.set(camera.position.x, camera.position.y, camera.position.z); street.boxB.position.copy(street.box.position); }
   if (street.fade > 0 && street.fade < 1) {
     street.fade = Math.min(1, street.fade + dt / 1.6);
     if (street.source === 'google') { setBoxOpacity(street.boxB, street.fade); if (street.fade >= 1) { const t = street.box; street.box.visible = false; street.box = street.boxB; street.boxB = t; setBoxOpacity(street.boxB, 0); } }
@@ -1688,7 +1690,8 @@ function update(dt) {
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
   if (view === 'fp') {
     const rolling = player.rolling > 0;
-    const eyeTarget = rolling ? 0.72 : 1.62;
+    const eyeBase = street.active && street.source ? 2.45 : 1.62;   // car-roof height to match the Street View photos
+    const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
