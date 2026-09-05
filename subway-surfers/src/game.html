@@ -39,6 +39,8 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #lanes i.cur{background:#fff}
   #turbo{position:fixed;left:50%;transform:translateX(-50%);bottom:max(48px,calc(env(safe-area-inset-bottom) + 30px));width:min(420px,70vw);font-family:var(--display);font-size:13px;letter-spacing:.22em;color:#ffb060;text-align:center;opacity:0;transition:opacity .25s;pointer-events:none;text-shadow:0 2px 8px #000}
   #turbo.on{opacity:1}
+  #turbo.mag{color:#9fd3ff}
+  #turbo.mag i{background:linear-gradient(90deg,#3f8fe0,#bfe3ff);box-shadow:0 0 12px #5aa8ff}
   #turbo i{display:block;height:5px;margin-top:6px;background:linear-gradient(90deg,#ff6a00,#ffd27a);box-shadow:0 0 12px #ff8a2a;border-radius:3px}
   #hint{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--ink-dim);opacity:0;transition:opacity .6s;pointer-events:none;text-shadow:0 2px 6px #000}
   #hint.on{opacity:.85}
@@ -100,7 +102,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 </div>
 <div id="best" class="plate"><div class="lbl">BEST</div><div class="val" id="bestv">000000</div></div>
 <div id="lanes"><i></i><i></i><i></i></div>
-<div id="turbo"><span>TURBO · DOUBLE POINTS · SUPER JUMP</span><i></i></div>
+<div id="turbo"><span>WINGS · SUPER JUMP · DOUBLE POINTS</span><i></i></div>
 <div id="hint">SWIPE OR ARROW KEYS · SPACE JUMP · DOWN ROLL</div>
 <div id="q"></div>
 <div id="build"></div>
@@ -119,9 +121,9 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
     </div>
     <ul class="rules">
       <li><b>◀ ▶ LANES</b>Swipe or arrow keys to change lane.</li>
-      <li><b>▲ JUMP</b>Clear the hurdles and the parked cars.</li>
-      <li><b>▼ ROLL</b>Duck under the clearance gates. Drop fast mid-air.</li>
-      <li><b>● TURBO</b>Grab the can: double points, super jump, coin magnet.</li>
+      <li><b>▲ JUMP · ▼ ROLL</b>Jump the hurdles, duck the clearance gates. Down drops you fast mid-air.</li>
+      <li><b>✦ WINGS</b>Glowing orange wings: float higher over the cars, double points.</li>
+      <li><b>∩ MAGNET</b>The red horseshoe: coins come to you.</li>
     </ul>
     <button class="ghost" id="btnTunnel" type="button">OR RUN THE TUNNEL INSTEAD</button>
   </div>
@@ -609,8 +611,11 @@ function buildMaterials() {
   M.wheel = std({ color: 0x3a3c3f, roughness: 0.4, metalness: 0.9, envMapIntensity: 0.8 });
   M.carGlass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.25, roughness: 0.02, transparent: true, opacity: 0.4, envMapIntensity: 1.8, depthWrite: false });
   M.carDetail = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1.0, roughness: 0.5, envMapIntensity: 1.0 });
-  M.boostCan = std({ color: 0xff7a1a, emissive: 0xff5a00, emissiveIntensity: 1.6, roughness: 0.25, metalness: 0.6, envMapIntensity: 1.2 });
+  M.boostCan = std({ color: 0xff7a1a, emissive: 0xff5a00, emissiveIntensity: 1.6, roughness: 0.25, metalness: 0.6, envMapIntensity: 1.2 });   // the glowing orb of the wings pickup
   M.boostRing = new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+  M.wing = std({ color: 0xfff1d6, emissive: 0xffb050, emissiveIntensity: 0.6, roughness: 0.5, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0.92 });
+  M.magnetRed = std({ color: 0xd8262a, roughness: 0.35, metalness: 0.2, envMapIntensity: 0.8 });
+  M.magnetTip = std({ color: 0xe8ecf0, roughness: 0.15, metalness: 1.0, envMapIntensity: 1.6 });
   M.glass = std({ color: 0x0a0d12, roughness: 0.06, metalness: 0.9, transparent: true, opacity: 0.42, envMapIntensity: 1.8, depthWrite: false });
   M.hazard = std({ map: T.hazard, roughness: 0.75, metalness: 0.35, normalMap: nmap('nDiamond', [2, 2]), normalScale: new THREE.Vector2(0.8, 0.8), envMapIntensity: 0.6 });
   M.fence = std({ map: T.fence, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.9, envMapIntensity: 0.8 });
@@ -728,8 +733,11 @@ function puddleGeometry() {
   const s = new THREE.Shape(pts); const g = new THREE.ShapeGeometry(s, 4); g.rotateX(-Math.PI / 2); return g;
 }
 function rampGeometry() {
-  G.boostCan = new THREE.CylinderGeometry(0.2, 0.2, 0.62, 18);
+  G.boostOrb = new THREE.SphereGeometry(0.24, 24, 18);
   G.boostRing = new THREE.TorusGeometry(0.5, 0.035, 8, 40);
+  G.wing = (() => { const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.quadraticCurveTo(0.35, 0.32, 0.72, 0.28); sh.quadraticCurveTo(0.6, 0.14, 0.62, 0.0); sh.quadraticCurveTo(0.42, -0.06, 0.3, -0.16); sh.quadraticCurveTo(0.14, -0.1, 0, -0.06); sh.closePath(); return new THREE.ShapeGeometry(sh, 12); })();
+  G.magnetArc = new THREE.TorusGeometry(0.3, 0.09, 12, 32, Math.PI);   // the red horseshoe
+  G.magnetTip = new THREE.CylinderGeometry(0.09, 0.09, 0.22, 14);
   const L = RAMP_LEN, H = TRAIN_TOP, W = TRAIN_W * 0.5;
   const p = [[-W, 0, 0], [W, 0, 0], [W, H, -L], [-W, 0, 0], [W, H, -L], [-W, H, -L], [-W, 0, 0], [-W, H, -L], [-W, 0, -L], [W, 0, 0], [W, 0, -L], [W, H, -L], [-W, 0, -L], [-W, H, -L], [W, H, -L], [-W, 0, -L], [W, H, -L], [W, 0, -L]];
   const uv = []; for (const v of p) uv.push((v[0] + W) / (2 * W) * 2, (-v[2]) / L * 6);
@@ -932,7 +940,7 @@ function segLamps(seg) { return seg.kind === 'tunnel' ? seg.tunLamps : seg.kind 
    Obstacles
    ============================================================ */
 const trains = [], barriers = [], coins = [];
-const pools = { train: {}, barrier: {}, coin: [], boost: [] };
+const pools = { train: {}, barrier: {}, coin: [], boost: {} };
 const boosts = [];
 const obstacleRoot = new THREE.Group(); scene.add(obstacleRoot);
 
@@ -1015,14 +1023,25 @@ function spawnCoin(lane, d, y) {
   obj.g.visible = true; obj.lane = lane; obj.d = d; obj.y = y; obj.gx = LANE_X[lane]; obj.g.position.set(LANE_X[lane], y, 0);
   coins.push(obj);
 }
-const TURBO_T = 7;
-function spawnBoost(lane, d) {
-  let obj = pools.boost.pop();
+const TURBO_T = 7, MAGNET_T = 10;
+/* Two pickups that look like what they do: WINGS (a glowing orange orb with wings) for the high, floaty jump and double
+   points; MAGNET (a red horseshoe with silver tips) that pulls coins in. */
+function spawnBoost(lane, d, kind) {
+  kind = kind || (Math.random() < 0.5 ? 'wings' : 'magnet');
+  const pool = pools.boost[kind] || (pools.boost[kind] = []);
+  let obj = pool.pop();
   if (!obj) {
-    const g = new THREE.Group();
-    const can = mesh(G.boostCan, M.boostCan, true, false); g.add(can);
-    const ring = new THREE.Mesh(G.boostRing, M.boostRing); ring.rotation.x = Math.PI / 2; g.add(ring);
-    obstacleRoot.add(g); obj = { g, ring };
+    const g = new THREE.Group(); let ring = null, wings = null;
+    if (kind === 'wings') {
+      g.add(mesh(G.boostOrb, M.boostCan, true, false));
+      ring = new THREE.Mesh(G.boostRing, M.boostRing); ring.rotation.x = Math.PI / 2; g.add(ring);
+      wings = [];
+      for (const sx of [-1, 1]) { const w = new THREE.Mesh(G.wing, M.wing); w.scale.x = sx; w.position.set(sx * 0.2, 0.02, 0); wings.push(w); g.add(w); }
+    } else {
+      const arc = mesh(G.magnetArc, M.magnetRed, true, false); g.add(arc);            // arc spans the top half, ends at x = ±0.3
+      for (const sx of [-1, 1]) { const tip = mesh(G.magnetTip, M.magnetTip, true, false); tip.position.set(sx * 0.3, -0.11, 0); g.add(tip); }
+    }
+    obstacleRoot.add(g); obj = { g, ring, wings, kind };
   }
   obj.g.visible = true; obj.lane = lane; obj.d = d; obj.g.position.set(LANE_X[lane], 1.1, 0);
   boosts.push(obj);
@@ -1774,6 +1793,7 @@ function beep(freq, dur, type, gain) {
   if (!actx) return;
   try { const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.value = freq; g.gain.setValueAtTime(gain || 0.08, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); } catch (e) { /* ignore */ }
 }
+const sfxMagnet = () => { [520, 660, 520, 660].forEach((f, i) => setTimeout(() => beep(f, 0.12, 'sine', 0.05), i * 80)); };
 const sfxBoost = () => { [660, 880, 1320, 1760].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'square', 0.05), i * 70)); };
 const sfxCoin = () => { beep(1320, 0.12, 'triangle', 0.05); setTimeout(() => beep(1760, 0.14, 'triangle', 0.04), 40); };
 const sfxJump = () => beep(220, 0.12, 'square', 0.025);
@@ -1783,7 +1803,7 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
 /* ============================================================
    Game state
    ============================================================ */
-const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0, turbo: 0, nextBoostD: 220 };
+const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0, turbo: 0, magnet: 0, nextBoostD: 220 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
 window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade, roadBend, spawnTrain, spawnBoost, spawnBarrier, state, segments, get carProto() { return carProto; } };
@@ -1797,8 +1817,8 @@ function updateHUD() { $('score').textContent = fmt(state.score); $('coins').tex
 
 function resetWorld() {
   for (const t of trains) { t.g.visible = false; t.pool.push(t); }
-  for (const b of boosts) { b.g.visible = false; pools.boost.push(b); }
-  boosts.length = 0; state.turbo = 0; state.nextBoostD = 220;
+  for (const b of boosts) { b.g.visible = false; pools.boost[b.kind].push(b); }
+  boosts.length = 0; state.turbo = 0; state.magnet = 0; state.nextBoostD = 220;
   for (const b of barriers) { b.g.visible = false; pools.barrier[b.type].push(b); }
   for (const c of coins) { c.g.visible = false; pools.coin.push(c); }
   trains.length = 0; barriers.length = 0; coins.length = 0;
@@ -1949,19 +1969,30 @@ function update(dt) {
   for (let i = coins.length - 1; i >= 0; i--) {
     const c = coins[i]; const z = -(c.d - state.traveled); c.g.rotation.y = spin + c.d * 0.3;
     if (z > 8) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); continue; }
-    if (run && state.turbo > 0 && z > -10 && z < 2) { const k = Math.min(1, dt * 7); c.gx += (player.x - c.gx) * k; c.y += (player.y + 1.0 - c.y) * k; }   // turbo magnet
+    if (run && state.magnet > 0 && z > -10 && z < 2) { const k = Math.min(1, dt * 7); c.gx += (player.x - c.gx) * k; c.y += (player.y + 1.0 - c.y) * k; }   // magnet pulls coins in
     c.g.position.set(c.gx + bendX(z), c.y, z); streetReveal(c.g, z);
     if (run && Math.abs(z) < 0.9 && Math.abs(c.gx - player.x) < 1.0 && c.y > player.y - 0.2 && c.y < player.y + 2.0) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); state.coins++; state.score += state.turbo > 0 ? 50 : 25; sfxCoin(); }
   }
   for (let i = boosts.length - 1; i >= 0; i--) {
     const b = boosts[i]; const z = -(b.d - state.traveled);
-    b.g.position.set(LANE_X[b.lane] + bendX(z), 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin; streetReveal(b.g, z);
-    if (z > 8) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); continue; }
-    if (run && Math.abs(z) < 1.0 && Math.abs(LANE_X[b.lane] - player.x) < 1.1 && player.y < 2.2) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); state.turbo = TURBO_T; state.score += 100; sfxBoost(); }
+    b.g.position.set(LANE_X[b.lane] + bendX(z), 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); streetReveal(b.g, z);
+    if (b.kind === 'wings') { b.g.rotation.y = Math.sin(state.time * 1.6) * 0.5; if (b.ring) b.ring.rotation.z = spin; const flap = Math.sin(state.time * 9) * 0.45; b.wings[0].rotation.y = -flap; b.wings[1].rotation.y = flap; }
+    else b.g.rotation.y = spin * 0.8;
+    if (z > 8) { boosts.splice(i, 1); b.g.visible = false; pools.boost[b.kind].push(b); continue; }
+    if (run && Math.abs(z) < 1.0 && Math.abs(LANE_X[b.lane] - player.x) < 1.1 && player.y < 2.2) {
+      boosts.splice(i, 1); b.g.visible = false; pools.boost[b.kind].push(b); state.score += 100;
+      if (b.kind === 'wings') { state.turbo = TURBO_T; sfxBoost(); } else { state.magnet = MAGNET_T; sfxMagnet(); }
+    }
   }
-  if (state.turbo > 0) { if (run) state.turbo = Math.max(0, state.turbo - dt); }
+  if (state.turbo > 0 && run) state.turbo = Math.max(0, state.turbo - dt);
+  if (state.magnet > 0 && run) state.magnet = Math.max(0, state.magnet - dt);
   const ln = $('lanes'); if (ln) { ln.classList.toggle('on', run && view === 'fp'); for (let i = 0; i < 3; i++) ln.children[i].classList.toggle('cur', i === player.lane); }
-  const tb = $('turbo'); if (tb) { tb.classList.toggle('on', state.turbo > 0); tb.querySelector('i').style.width = (state.turbo / TURBO_T * 100).toFixed(1) + '%'; }
+  const tb = $('turbo'); if (tb) {
+    const w = state.turbo > 0, m = state.magnet > 0;
+    tb.classList.toggle('on', w || m); tb.classList.toggle('mag', m && !w);
+    tb.querySelector('span').textContent = w && m ? 'WINGS + MAGNET · SUPER JUMP · DOUBLE POINTS · COINS COME TO YOU' : w ? 'WINGS · SUPER JUMP · DOUBLE POINTS' : 'MAGNET · COINS COME TO YOU';
+    tb.querySelector('i').style.width = (Math.max(state.turbo / TURBO_T, state.magnet / MAGNET_T) * 100).toFixed(1) + '%';
+  }
 
   if (run) {
     const tx = LANE_X[player.lane];
