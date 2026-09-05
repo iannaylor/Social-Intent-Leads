@@ -39,11 +39,10 @@ View Static API in the Google Cloud console. Place lookup uses postcodes.io for
 UK postcodes and Nominatim for anything else, so Street mode needs a hosted
 copy rather than the Claude artifact frame. `?pc=SW1A%201AA` pre-fills a place.
 
-Street mode has its own hazards and rewards: parked buses with a ramp at the
-back that you run up and ride along the roof (coins up there), oncoming buses to
-dodge as the run speeds up, parked cars, hurdles and gates, and a glowing TURBO
-can every few hundred metres that gives seven seconds of double points, a super
-jump that clears cars and lands on bus roofs without a ramp, and a coin magnet.
+Street mode has its own hazards and rewards: real parked cars (a CC BY Ferrari
+458 model, see ATTRIBUTION.md), hurdles and gates, and a glowing TURBO can every
+few hundred metres that gives seven seconds of double points, a super jump that
+clears the cars, and a coin magnet.
 
 ### Hosting on GitHub Pages
 

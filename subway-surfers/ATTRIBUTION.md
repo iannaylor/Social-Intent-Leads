@@ -15,3 +15,10 @@ Street mode fetches imagery at run time and does not embed it. Google Street Vie
 images come from the Street View Static API and are shown with the "Google Street
 View" credit in the corner label, subject to the Google Maps Platform terms. Mapillary
 360° photos are CC BY-SA 4.0 from their contributors and are credited the same way.
+
+# Car model
+
+`car.glb` is the Ferrari 458 Italia model by vicent091036 (CC BY 4.0), as shipped with the
+three.js examples (`examples/models/gltf/ferrari.glb`), welded, simplified and Draco compressed
+for this game; `car_ao.png` is its baked ground shadow from the same examples. The Draco decoder
+is loaded from jsDelivr at run time.
