@@ -614,8 +614,10 @@ function buildMaterials() {
   M.bench = std({ map: T.wood, color: 0x7a5a3a, roughness: 0.8, envMapIntensity: 0.3 });
   M.puddle = std({ color: 0x05070a, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.8, envMapIntensity: 1.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
   M.asphalt = std({ map: T.asphalt, color: 0x8e8e90, roughness: 0.95, normalMap: nmap('nConcrete', [2, 8]), normalScale: new THREE.Vector2(0.5, 0.5), envMapIntensity: 0.25 });
+  fadeWithDistance(M.asphalt);
   M.kerb = std({ color: 0xa9a49c, map: T.concrete, roughness: 0.9, envMapIntensity: 0.3 });
   M.kerbDark = std({ color: 0x6a6660, map: T.concrete, roughness: 0.95, envMapIntensity: 0.2 });
+  fadeWithDistance(M.kerbDark);
   M.paving = std({ map: T.paving, color: 0xa8a49c, roughness: 0.9, normalMap: nmap('nConcrete', [1.6, 25]), normalScale: new THREE.Vector2(0.5, 0.5), envMapIntensity: 0.3 });
   M.hedge = std({ map: T.hedge, roughness: 1, envMapIntensity: 0.15 });
   M.grime = std({ map: T.grime, transparent: true, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, envMapIntensity: 0 });
@@ -1157,6 +1159,16 @@ function setView(v) {
    every few hundred metres.
    ============================================================ */
 const STREET_COIN_SCALE = 0.8;
+/* Street mode: the game road dissolves between 45 and 95 m so the real road in the photo carries on from it */
+const roadFade = { value: 0 };
+function fadeWithDistance(mat) {
+  mat.transparent = true;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uRoadFade = roadFade;
+    sh.fragmentShader = sh.fragmentShader.replace('uniform vec3 diffuse;', 'uniform vec3 diffuse; uniform float uRoadFade;')
+      .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n  gl_FragColor.a *= 1.0 - uRoadFade * smoothstep(45.0, 95.0, fogDepth);\n#endif');
+  };
+}
 const street = { linked: false, seen: new Set(), pending: null, active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
 const streetEl = $('street');
 function streetToken() {
@@ -1367,7 +1379,7 @@ async function gsvLoad(box, cur) {
   put(f.ahead, ta); put(f.right, tr); put(f.left, tl); put(f.up, tu); f.behind.visible = false;
   // turn the photo so its road vanishes straight ahead, and carry the correction into the heading used for the next hop
   const yaw = street.linked ? null : roadYaw(ta.image);
-  cur.yaw = yaw ? clamp(yaw, -12, 12) : 0; box.rotation.y = cur.yaw * Math.PI / 180;
+  cur.yaw = yaw ? clamp(yaw, -12, 12) : 0; box.userData.yaw = cur.yaw * Math.PI / 180; box.rotation.y = box.userData.yaw;
   if (cur.yaw) cur.heading += cur.yaw;
 }
 /* bring the panorama loaded in boxB into view */
@@ -1491,6 +1503,10 @@ function streetUpdate(dt) {
     const fading = street.fade > 0 && street.fade < 1;
     street.box.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + (fading ? street.outDrift : street.drift));
     street.boxB.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + street.drift);
+    // a sideways step swings nearby scenery the other way; the photo has no depth, so swing it as if it stood 25 m off
+    const swing = Math.atan(camera.position.x / 25);
+    street.box.rotation.y = (street.box.userData.yaw || 0) + swing; street.boxB.rotation.y = (street.boxB.userData.yaw || 0) + swing;
+    roadFade.value = street.source ? 1 : 0;
   }
   if (street.fade > 0 && street.fade < 1) {
     street.fade = Math.min(1, street.fade + dt / 0.7);
@@ -1595,7 +1611,7 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
 const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
-window.ballastRun = state; window.indiStreet = street;
+window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade };
 window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
 let lights, runner, dust;
@@ -1831,7 +1847,8 @@ function update(dt) {
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
     const lean = (LANE_X[player.lane] - player.x) * 0.09;
-    let ex = player.x + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
+    const follow = street.active ? 0.55 : 1;   // in Street mode the eye follows the lane only partway: the photo has no depth to slide with
+    let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
     let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0);
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
     if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
