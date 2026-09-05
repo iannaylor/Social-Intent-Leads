@@ -100,3 +100,25 @@ node tools/build.mjs
 ```
 
 Best score is kept in `localStorage` under `indiswipeout.best`.
+
+### Custom domain (localsurfer.app)
+
+GitHub Pages serves the site at the domain once two things are done:
+
+1. **DNS at the registrar.** For the apex `localsurfer.app` add four A records
+   (185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153) and
+   four AAAA records (2606:50c0:8000::153, 2606:50c0:8001::153,
+   2606:50c0:8002::153, 2606:50c0:8003::153). For `www` add a CNAME record
+   pointing at `iannaylor.github.io`.
+2. **GitHub.** Repository → Settings → Pages → Custom domain: enter
+   `localsurfer.app`, Save, wait for the DNS check to pass, then tick
+   Enforce HTTPS once the certificate has been issued (a few minutes to an
+   hour). `.app` domains only work over HTTPS, so this step is required.
+
+The site then lives at `https://localsurfer.app/` and the old address
+redirects to it. Because the page is deployed by a GitHub Actions workflow,
+no CNAME file is needed in the repository. Remember to add
+`https://localsurfer.app/*` and `https://www.localsurfer.app/*` to the Google
+Maps key's website restrictions, or Street View will be refused on the new
+address.
+
