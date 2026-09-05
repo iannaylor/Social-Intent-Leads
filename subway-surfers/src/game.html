@@ -1399,36 +1399,44 @@ const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/s
 function loadTex(url) {
   return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('Street View image blocked by the browser (CORS) – ' + url.replace(/key=[^&]*/, 'key=…')))); });
 }
-/* The photo box is a backdrop: opaque, drawn before everything else and ignoring depth, so obstacles at any
-   distance draw over it. Each face blends two photos (the one on show and the next) inside its shader. */
-const BOX_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
-const BOX_FRAG = `uniform sampler2D texA, texB; uniform float mixT, hasA, hasB; uniform vec3 fill; varying vec2 vUv;
-vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }   // the photos are sRGB JPEGs; the scene works in linear light
+/* The photo "room": a box 24 m wide and long whose floor is the real ground and whose walls stand 12 m off, drawn
+   before everything else and ignoring depth. Every point of it is coloured by looking up the panorama in the direction
+   from the Street View camera position (2.6 m above the road) to that point, so the photo's road, kerbs and verges land
+   on the true ground plane and share the game road's perspective exactly, while houses and sky sit on the walls. Each
+   face blends two panoramas (the one on show and the next) for the cross-fade. */
+const BOX_VERT = 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+const BOX_FRAG = `uniform sampler2D aA, rA, lA, uA, aB, rB, lB, uB; uniform float mixT, hasA, hasB; uniform vec3 fill, center; varying vec3 vPos;
+vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 look(sampler2D fa, sampler2D fr, sampler2D fl, sampler2D fu, vec3 d) {
+  vec3 ad = abs(d);
+  if (ad.z >= ad.x && ad.z >= ad.y) { if (d.z > 0.0) return fill; return toLinear(texture2D(fa, vec2(0.5 + 0.5 * d.x / -d.z, 0.5 + 0.5 * d.y / -d.z)).rgb); }
+  if (ad.x >= ad.y) { if (d.x > 0.0) return toLinear(texture2D(fr, vec2(0.5 + 0.5 * d.z / d.x, 0.5 + 0.5 * d.y / d.x)).rgb); return toLinear(texture2D(fl, vec2(0.5 + 0.5 * d.z / d.x, 0.5 + 0.5 * d.y / -d.x)).rgb); }
+  if (d.y > 0.0) return toLinear(texture2D(fu, vec2(0.5 + 0.5 * d.x / d.y, 0.5 + 0.5 * d.z / d.y)).rgb);
+  return fill;
+}
 void main(){
-  vec3 a = hasA > 0.5 ? toLinear(texture2D(texA, vUv).rgb) : fill;
-  vec3 b = hasB > 0.5 ? toLinear(texture2D(texB, vUv).rgb) : fill;
+  vec3 d = normalize(vPos - center);
+  vec3 a = hasA > 0.5 ? look(aA, rA, lA, uA, d) : fill;
+  vec3 b = hasB > 0.5 ? look(aB, rB, lB, uB, d) : fill;
   gl_FragColor = vec4(mix(a, b, mixT), 1.0);
 }`;
+const ROOM_H = STREET_EYE + GSV_R;   // floor on the ground, ceiling 12 m above the Street View camera
 function makeBox() {
-  const g = new THREE.Group(), d = GSV_R, geo = new THREE.PlaneGeometry(2 * d, 2 * d);
-  const mk = () => new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: { texA: { value: null }, texB: { value: null }, mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) } }, vertexShader: BOX_VERT, fragmentShader: BOX_FRAG, depthTest: false, depthWrite: false }));
-  const ahead = mk(); ahead.position.z = -d;                                  // faces +z (toward the eye)
-  const right = mk(); right.position.x = d; right.rotation.y = -Math.PI / 2;
-  const behind = mk(); behind.position.z = d; behind.rotation.y = Math.PI;
-  const left = mk(); left.position.x = -d; left.rotation.y = Math.PI / 2;
-  const up = mk(); up.position.y = d; up.rotation.x = Math.PI / 2;          // image top edge = behind
-  const down = mk(); down.position.y = -d; down.rotation.x = -Math.PI / 2;
-  for (const m of [ahead, right, behind, left, up, down]) { m.renderOrder = -10; m.frustumCulled = false; g.add(m); }
-  g.userData.faces = { ahead, right, behind, left, up, down }; g.visible = false; scene.add(g); return g;
+  const geo = new THREE.BoxGeometry(2 * GSV_R, ROOM_H, 2 * GSV_R);
+  const u = { mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) }, center: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, 0) } };
+  for (const k of ['aA', 'rA', 'lA', 'uA', 'aB', 'rB', 'lB', 'uB']) u[k] = { value: null };
+  const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: u, vertexShader: BOX_VERT, fragmentShader: BOX_FRAG, side: THREE.BackSide, depthTest: false, depthWrite: false }));
+  m.renderOrder = -10; m.frustumCulled = false; m.visible = false; scene.add(m); return m;
 }
-function setBoxMix(g, t) { for (const m of g.children) m.material.uniforms.mixT.value = t; }
+function setBoxMix(m, t) { m.material.uniforms.mixT.value = t; }
 /* the incoming photo becomes the one on show */
-function commitBox(g) {
-  for (const m of g.children) {
-    const u = m.material.uniforms;
-    if (u.hasB.value > 0.5) { if (u.texA.value && u.texA.value !== u.texB.value) u.texA.value.dispose(); u.texA.value = u.texB.value; u.hasA.value = 1; }
-    u.mixT.value = 0;
+function commitBox(m) {
+  const u = m.material.uniforms;
+  if (u.hasB.value > 0.5) {
+    for (const k of ['a', 'r', 'l', 'u']) { const A = u[k + 'A'], B = u[k + 'B']; if (A.value && A.value !== B.value) A.value.dispose(); A.value = B.value; }
+    u.hasA.value = 1;
   }
+  u.mixT.value = 0;
 }
 /* Read the road out of the "ahead" photo: grey, low-saturation pixels in two bands below the horizon give the road's
    centre near and far; the line through them meets the horizon at the road's vanishing point. Returns the yaw
@@ -1458,10 +1466,11 @@ function roadYaw(img) {
 }
 /* load a panorama's four visible faces (ahead, right, left, up) into a box; behind is never in view */
 async function gsvLoad(box, cur) {
-  const f = box.userData.faces, H = cur.heading;
+  const H = cur.heading;
   const [ta, tr, tl, tu] = await Promise.all([loadTex(gsvUrl(cur.pano, H, 0)), loadTex(gsvUrl(cur.pano, H + 90, 0)), loadTex(gsvUrl(cur.pano, H + 270, 0)), loadTex(gsvUrl(cur.pano, H, 90))]);
-  const put = (m, t) => { const u = m.material.uniforms; if (u.texB.value && u.texB.value !== u.texA.value) u.texB.value.dispose(); u.texB.value = t; u.hasB.value = 1; };
-  put(f.ahead, ta); put(f.right, tr); put(f.left, tl); put(f.up, tu);
+  const u = box.material.uniforms;
+  const put = (k, t) => { const B = u[k + 'B'], A = u[k + 'A']; if (B.value && B.value !== A.value) B.value.dispose(); B.value = t; };
+  put('a', ta); put('r', tr); put('l', tl); put('u', tu); u.hasB.value = 1;
   // turn the photo so its road vanishes straight ahead, and carry the correction into the heading used for the next hop
   const yaw = street.linked ? null : roadYaw(ta.image);
   cur.yaw = yaw ? clamp(yaw, -12, 12) : 0; box.userData.yaw = cur.yaw * Math.PI / 180; box.rotation.y = box.userData.yaw;
@@ -1580,7 +1589,7 @@ function streetUpdate(dt) {
   if (street.box) {
     // The box sits on the road axis at the Street View camera height and only travels forward with the runner, so a
     // lane step, a jump or a duck moves the eye through the picture and the photo shifts along with the road.
-    street.box.position.set(0, STREET_EYE + GSV_LIFT, camera.position.z);
+    street.box.position.set(0, ROOM_H / 2, camera.position.z);
     street.box.rotation.y = street.box.userData.yaw || 0;
     roadFade.value = street.source ? 1 : 0;
   }
