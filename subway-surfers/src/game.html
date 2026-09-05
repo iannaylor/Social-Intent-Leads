@@ -1548,7 +1548,7 @@ let dayState = null;
 function applyStreetLighting(on) {
   if (on) {
     if (!dayState) dayState = { fog: scene.fog, bg: scene.background, key: lights.key.intensity, keyCol: lights.key.color.getHex(), hemi: lights.hemi.intensity, rim: lights.rim.intensity };
-    scene.fog = new THREE.FogExp2(0xc4c8cc, 0.006); scene.background = new THREE.Color(0x9fb3c8);
+    scene.fog = new THREE.FogExp2(0xc4c8cc, 0.0004); scene.background = new THREE.Color(0x9fb3c8);   // next to no fog: the photo behind is not fogged, so fogged obstacles would look ghostly
     lights.key.intensity = 1.45; lights.key.color.setHex(0xfff3e0); lights.hemi.intensity = 0.6; lights.hemi.color.setHex(0xbfd2ee); lights.hemi.groundColor.setHex(0x6b6660); lights.rim.intensity = 0.15;
     bloomPass.strength = 0.18;
   } else if (dayState) {
@@ -1928,13 +1928,13 @@ function update(dt) {
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
     const lean = (LANE_X[player.lane] - player.x) * 0.09;
-    const follow = street.active ? 0.85 : 1;
+    const follow = street.active ? 0 : 1;   // Street mode: the eye stays on the road's axis so the road never skews against the photo; the head turns toward the lane instead
     let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
     let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0) - (street.active ? player.x * 0.016 : 0);   // a steady lean into a side lane
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
     if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
     camera.position.set(ex, ey, ez);
-    camera.lookAt(player.x + lean * 3, pitchY, -9);
+    camera.lookAt(street.active ? player.x * 0.55 + lean * 3 : player.x + lean * 3, pitchY, -9);
     camera.rotateZ(roll);
     camera.fov = 68 + speed * 0.28;
   } else {
