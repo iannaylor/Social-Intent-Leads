@@ -895,9 +895,9 @@ function buildSegment() {
   }
   // ---- street variant: tarmac, kerbs, pavements, walls and hedges, lamp posts, bins
   const str = new THREE.Group(); root.add(str);
-  const road = mesh(new THREE.PlaneGeometry(7.8, SEG_LEN), M.asphalt, false, true); road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);   // a UK lane, not a dual carriageway
+  const road = mesh(new THREE.PlaneGeometry(7.8, SEG_LEN, 1, 24), M.asphalt, false, true);   // subdivided along its length so the bend is a smooth arc road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);   // a UK lane, not a dual carriageway
   for (const side of [-1, 1]) {
-    const kerb = mesh(new THREE.BoxGeometry(0.3, 0.1, SEG_LEN), M.kerbDark, true, true); kerb.position.set(side * 4.0, 0.05, 0); str.add(kerb);
+    const kerb = mesh(new THREE.BoxGeometry(0.3, 0.1, SEG_LEN, 1, 1, 24), M.kerbDark, true, true); kerb.position.set(side * 4.0, 0.05, 0); str.add(kerb);
     const pave = mesh(new THREE.BoxGeometry(2.6, 0.14, SEG_LEN), M.paving, true, true); pave.position.set(side * 5.5, 0.07, 0); pave.userData.furniture = true; str.add(pave);   // the photo carries the real pavement
     const edge = mesh(new THREE.BoxGeometry(0.4, 0.9, SEG_LEN), M.brickWall, true, true); edge.position.set(side * 8.1, 0.45, 0); edge.userData.wall = true; str.add(edge);
     const hedge = mesh(new THREE.BoxGeometry(0.9, 1.5, SEG_LEN), M.hedge, true, true); hedge.position.set(side * 8.4, 0.75, 0); hedge.userData.hedge = true; str.add(hedge);
@@ -1225,14 +1225,19 @@ function setView(v) {
    every few hundred metres.
    ============================================================ */
 const STREET_COIN_SCALE = 0.8;
-/* Street mode: the game road dissolves between 45 and 95 m so the real road in the photo carries on from it */
-const roadFade = { value: 0 };
+/* Street mode: the game road dissolves between 35 and 75 m so the real road in the photo carries on from it, and it
+   bends to follow the real road (x grows with the square of the distance ahead, like an arc) so on a corner the far
+   end aims where the photo's road goes rather than into a house. Obstacles are bent by the same rule. */
+const roadFade = { value: 0 }, roadBend = { value: 0 };
+const bendX = (z) => { const dz = Math.max(0, -z - 2); return roadBend.value * dz * dz; };
 function fadeWithDistance(mat) {
   mat.transparent = true;
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uRoadFade = roadFade;
+    sh.uniforms.uRoadFade = roadFade; sh.uniforms.uBend = roadBend;
+    sh.vertexShader = 'uniform float uBend;\n' + sh.vertexShader.replace('#include <project_vertex>',
+      'vec4 worldPos = modelMatrix * vec4(transformed, 1.0);\n  float dzA = max(0.0, cameraPosition.z - worldPos.z - 2.0);\n  worldPos.x += uBend * dzA * dzA;\n  vec4 mvPosition = viewMatrix * worldPos;\n  gl_Position = projectionMatrix * mvPosition;');
     sh.fragmentShader = sh.fragmentShader.replace('uniform vec3 diffuse;', 'uniform vec3 diffuse; uniform float uRoadFade;')
-      .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n  gl_FragColor.a *= 1.0 - uRoadFade * smoothstep(45.0, 95.0, fogDepth);\n#endif');
+      .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n  gl_FragColor.a *= 1.0 - uRoadFade * smoothstep(35.0, 75.0, fogDepth);\n#endif');
   };
 }
 const street = { linked: false, seen: new Set(), pending: null, active: false, place: null, panos: [], panoIdx: -1, sky: null, skyB: null, fade: 0, nextSwapD: 0, loading: false, cache: {}, plainSky: false, runStart: 0, gsv: null, box: null, boxB: null, source: '' };
@@ -1539,7 +1544,7 @@ async function startStreet(place) {
   setStreetStatus('Finding 360° photos near ' + (place.name || 'you') + '…');
   if (!street.sky) { street.sky = makeSky(); street.skyB = makeSky(); }
   if (!street.box) street.box = makeBox();
-  street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = ''; street.seen = new Set(); street.pending = null;
+  street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = ''; street.seen = new Set(); street.pending = null; street.bend = 0; street.bendTarget = 0;
   street.sky.visible = false; street.skyB.visible = false; street.box.visible = false;
   street.active = true;
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
@@ -1598,6 +1603,13 @@ function streetUpdate(dt) {
     street.box.position.set(0, ROOM_H / 2, camera.position.z);
     street.box.rotation.y = street.box.userData.yaw || 0;
     roadFade.value = street.source ? 1 : 0;
+    // curvature from the heading change to the next panorama over the distance between them (an arc: x = k * d^2)
+    if (street.linked && street.gsv && street.pending && street.pending.ready && street.pending.cur) {
+      const dh = ((street.pending.cur.heading - street.gsv.heading + 540) % 360) - 180, hop = street.pending.hop || 20;
+      street.bendTarget = clamp(dh * Math.PI / 180 / hop, -0.008, 0.008) * 0.5;
+    }
+    street.bend = lerp(street.bend || 0, street.bendTarget || 0, Math.min(1, dt * 1.5));
+    roadBend.value = street.source === 'google' ? street.bend : 0;
   }
   if (street.fade > 0 && street.fade < 1) {
     street.fade = Math.min(1, street.fade + dt / 0.7);
@@ -1858,7 +1870,7 @@ function update(dt) {
     if (t.moving && z < 2 && (!nearestMoving || z > nearestMoving.z)) nearestMoving = { t, z };
   }
   for (let i = barriers.length - 1; i >= 0; i--) {
-    const b = barriers[i]; const z = -(b.d - state.traveled); b.g.position.z = z;
+    const b = barriers[i]; const z = -(b.d - state.traveled); b.g.position.z = z; b.g.position.x = LANE_X[b.lane] + bendX(z);
     if (z > 12) { barriers.splice(i, 1); b.g.visible = false; pools.barrier[b.type].push(b); }
   }
   const spin = state.time * 3.2;
@@ -1866,12 +1878,12 @@ function update(dt) {
     const c = coins[i]; const z = -(c.d - state.traveled); c.g.rotation.y = spin + c.d * 0.3;
     if (z > 8) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); continue; }
     if (run && state.turbo > 0 && z > -10 && z < 2) { const k = Math.min(1, dt * 7); c.gx += (player.x - c.gx) * k; c.y += (player.y + 1.0 - c.y) * k; }   // turbo magnet
-    c.g.position.set(c.gx, c.y, z);
+    c.g.position.set(c.gx + bendX(z), c.y, z);
     if (run && Math.abs(z) < 0.9 && Math.abs(c.gx - player.x) < 1.0 && c.y > player.y - 0.2 && c.y < player.y + 2.0) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); state.coins++; state.score += state.turbo > 0 ? 50 : 25; sfxCoin(); }
   }
   for (let i = boosts.length - 1; i >= 0; i--) {
     const b = boosts[i]; const z = -(b.d - state.traveled);
-    b.g.position.set(LANE_X[b.lane], 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin;
+    b.g.position.set(LANE_X[b.lane] + bendX(z), 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin;
     if (z > 8) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); continue; }
     if (run && Math.abs(z) < 1.0 && Math.abs(LANE_X[b.lane] - player.x) < 1.1 && player.y < 2.2) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); state.turbo = TURBO_T; state.score += 100; sfxBoost(); }
   }
