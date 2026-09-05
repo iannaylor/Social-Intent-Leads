@@ -1303,7 +1303,8 @@ async function gsvMeta(lat, lng, radius) {
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
-const GSV_RADIUS = 1500, GSV_SWAP = 150;   // search radius for the first photo; metres of running between photos
+const GSV_RADIUS = 1500, GSV_SWAP = 150;
+const GSV_R = 12, STREET_EYE = 2.6;   // the photo box is 12 m around the road and fixed in the world at the Street View camera height, so the eye moves through it like a room   // search radius for the first photo; metres of running between photos
 const GSV_LIFT = (() => { const v = parseFloat(new URLSearchParams(location.search).get('lift')); return isNaN(v) ? 0 : v; })();   // metres the photo is raised above the eye (0 keeps both roads' vanishing points together); ?lift=N to experiment
 const angDiff = (a, b) => { const d = (((a - b) % 360) + 360) % 360; return d > 180 ? 360 - d : d; };
 const gsvPt = (m, heading) => ({ pano: m.pano_id, lat: m.location.lat, lng: m.location.lng, heading, date: m.date || '' });
@@ -1399,7 +1400,7 @@ function loadTex(url) {
   return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('Street View image blocked by the browser (CORS) – ' + url.replace(/key=[^&]*/, 'key=…')))); });
 }
 function makeBox() {
-  const g = new THREE.Group(), d = 100, geo = new THREE.PlaneGeometry(2 * d, 2 * d);
+  const g = new THREE.Group(), d = GSV_R, geo = new THREE.PlaneGeometry(2 * d, 2 * d);
   const mk = () => new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 1, depthWrite: false }));
   const ahead = mk(); ahead.position.z = -d;                                  // faces +z (toward the eye)
   const right = mk(); right.position.x = d; right.rotation.y = -Math.PI / 2;
@@ -1563,15 +1564,15 @@ function streetUpdate(dt) {
   if (street.box) {
     // the photo is lifted so the game road sits down in the picture, and the eye drifts forward through the box
     // between photos so the picture approaches the way the next one will look; the outgoing photo keeps its drift
-    const hop = (street.pending && street.pending.hop) || street.hop || 25;
+    // The box sits on the road axis at the Street View camera height and only travels forward with the runner, so a
+    // lane step, a jump or a duck moves the eye through the picture and the photo shifts along with the road.
+    // Between photos the eye drifts a quarter of the way toward the front face so the picture approaches.
     const frac = state.mode === 'run' ? clamp((state.traveled - street.runStart - (street.nextSwapD - GSV_SWAP)) / GSV_SWAP, 0, 1) : 0;
-    street.drift = hop * frac;
+    street.drift = 0.25 * GSV_R * frac;
     const fading = street.fade > 0 && street.fade < 1;
-    street.box.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + (fading ? street.outDrift : street.drift));
-    street.boxB.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + street.drift);
-    // a sideways step swings nearby scenery the other way; the photo has no depth, so swing it as if it stood 25 m off
-    const swing = Math.atan(camera.position.x / 30);
-    street.box.rotation.y = (street.box.userData.yaw || 0) + swing; street.boxB.rotation.y = (street.boxB.userData.yaw || 0) + swing;
+    street.box.position.set(0, STREET_EYE + GSV_LIFT, camera.position.z + (fading ? street.outDrift : street.drift));
+    street.boxB.position.set(0, STREET_EYE + GSV_LIFT, camera.position.z + street.drift);
+    street.box.rotation.y = street.box.userData.yaw || 0; street.boxB.rotation.y = street.boxB.userData.yaw || 0;
     roadFade.value = street.source ? 1 : 0;
   }
   if (street.fade > 0 && street.fade < 1) {
@@ -1921,13 +1922,13 @@ function update(dt) {
   const bob = state.mode === 'run' ? Math.sin(player.runPhase * 2) * 0.012 : 0;
   if (view === 'fp') {
     const rolling = player.rolling > 0;
-    const eyeBase = street.active ? 2.6 : 1.62;   // Street View car camera height, so the photo's ground and the game's ground coincide
+    const eyeBase = street.active ? STREET_EYE : 1.62;   // Street View car camera height, so the photo's ground and the game's ground coincide
     const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
     const lean = (LANE_X[player.lane] - player.x) * 0.09;
-    const follow = street.active ? 0.7 : 1;   // in Street mode the eye follows the lane most of the way, so your lane reads clearly
+    const follow = street.active ? 0.85 : 1;
     let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
     let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0) - (street.active ? player.x * 0.016 : 0);   // a steady lean into a side lane
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
