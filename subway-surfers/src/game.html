@@ -895,7 +895,7 @@ function buildSegment() {
   }
   // ---- street variant: tarmac, kerbs, pavements, walls and hedges, lamp posts, bins
   const str = new THREE.Group(); root.add(str);
-  const road = mesh(new THREE.PlaneGeometry(7.8, SEG_LEN, 1, 24), M.asphalt, false, true);   // subdivided along its length so the bend is a smooth arc road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);   // a UK lane, not a dual carriageway
+  const road = mesh(new THREE.PlaneGeometry(7.8, SEG_LEN, 1, 24), M.asphalt, false, true); road.rotation.x = -Math.PI / 2; road.position.y = 0.01; str.add(road);   // a UK lane, subdivided along its length so the bend is a smooth arc
   for (const side of [-1, 1]) {
     const kerb = mesh(new THREE.BoxGeometry(0.3, 0.1, SEG_LEN, 1, 1, 24), M.kerbDark, true, true); kerb.position.set(side * 4.0, 0.05, 0); str.add(kerb);
     const pave = mesh(new THREE.BoxGeometry(2.6, 0.14, SEG_LEN), M.paving, true, true); pave.position.set(side * 5.5, 0.07, 0); pave.userData.furniture = true; str.add(pave);   // the photo carries the real pavement
@@ -1308,7 +1308,7 @@ async function gsvMeta(lat, lng, radius) {
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
-const GSV_RADIUS = 1500, GSV_SWAP = 150;
+const GSV_RADIUS = 1500, GSV_SWAP = 120;
 const GSV_R = 12, STREET_EYE = 2.6;
 // how far the eye travels toward a side lane in Street mode (1 = the full 2.6 m, 0 = stays on the road axis); ?follow=0.35 to tune
 const STREET_FOLLOW = (() => { const v = parseFloat(new URLSearchParams(location.search).get('follow')); return isNaN(v) ? 0 : Math.max(0, Math.min(1, v)); })();
@@ -1450,7 +1450,7 @@ function loadTex(url) {
    on the true ground plane and share the game road's perspective exactly, while houses and sky sit on the walls. Each
    face blends two panoramas (the one on show and the next) for the cross-fade. */
 const BOX_VERT = 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
-const BOX_FRAG = `uniform sampler2D aA, rA, lA, uA, aB, rB, lB, uB; uniform float mixT, hasA, hasB; uniform vec3 fill, center; varying vec3 vPos;
+const BOX_FRAG = `uniform sampler2D aA, rA, lA, uA, aB, rB, lB, uB; uniform float mixT, hasA, hasB; uniform vec3 fill, centerA, centerB; varying vec3 vPos;
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 look(sampler2D fa, sampler2D fr, sampler2D fl, sampler2D fu, vec3 d) {
   vec3 ad = abs(d);
@@ -1460,15 +1460,16 @@ vec3 look(sampler2D fa, sampler2D fr, sampler2D fl, sampler2D fu, vec3 d) {
   return fill;
 }
 void main(){
-  vec3 d = normalize(vPos - center);
-  vec3 a = hasA > 0.5 ? look(aA, rA, lA, uA, d) : fill;
-  vec3 b = hasB > 0.5 ? look(aB, rB, lB, uB, d) : fill;
+  vec3 a = hasA > 0.5 ? look(aA, rA, lA, uA, normalize(vPos - centerA)) : fill;
+  vec3 b = hasB > 0.5 ? look(aB, rB, lB, uB, normalize(vPos - centerB)) : fill;
   gl_FragColor = vec4(mix(a, b, mixT), 1.0);
 }`;
 const ROOM_H = STREET_EYE + GSV_R;   // floor on the ground, ceiling 12 m above the Street View camera
+const ROOM_BACK = 12, ROOM_AHEAD = 45, ROOM_D = ROOM_BACK + ROOM_AHEAD;   // the room runs 45 m ahead of the panorama: the eye walks forward through it
+const ROOM_CZ = ROOM_D / 2 - ROOM_BACK;   // the panorama's position inside the room, in the room's own coordinates (z toward the back wall)
 function makeBox() {
-  const geo = new THREE.BoxGeometry(2 * GSV_R, ROOM_H, 2 * GSV_R);
-  const u = { mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) }, center: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, 0) } };
+  const geo = new THREE.BoxGeometry(2 * GSV_R, ROOM_H, ROOM_D);
+  const u = { mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) }, centerA: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) }, centerB: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) } };
   for (const k of ['aA', 'rA', 'lA', 'uA', 'aB', 'rB', 'lB', 'uB']) u[k] = { value: null };
   const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: u, vertexShader: BOX_VERT, fragmentShader: BOX_FRAG, side: THREE.BackSide, depthTest: false, depthWrite: false }));
   m.renderOrder = -10; m.frustumCulled = false; m.visible = false; scene.add(m); return m;
@@ -1481,7 +1482,7 @@ function commitBox(m) {
     for (const k of ['a', 'r', 'l', 'u']) { const A = u[k + 'A'], B = u[k + 'B']; if (A.value && A.value !== B.value) A.value.dispose(); A.value = B.value; }
     u.hasA.value = 1;
   }
-  u.mixT.value = 0;
+  u.centerA.value.copy(u.centerB.value); u.mixT.value = 0;
 }
 /* Read the road out of the "ahead" photo: grey, low-saturation pixels in two bands below the horizon give the road's
    centre near and far; the line through them meets the horizon at the road's vanishing point. Returns the yaw
@@ -1524,6 +1525,11 @@ async function gsvLoad(box, cur) {
 /* bring the panorama loaded in boxB into view */
 function gsvBegin(cur, instant) {
   street.box.visible = true;
+  // the eye has walked `drift` metres past the old panorama; the new one is taken from (about) there, so it is
+  // projected from the eye and the old photo keeps a centre `drift` behind for the cross-fade
+  const u = street.box.material.uniforms;
+  u.centerA.value.z = ROOM_CZ + (street.drift || 0); u.centerB.value.z = ROOM_CZ;
+  street.drift = 0; street.swapAt = state.traveled;
   if (instant) { commitBox(street.box); street.fade = 1; } else { setBoxMix(street.box, 0); street.fade = 0.0001; }
   street.gsv = cur; street.seen.add(cur.pano); street.pending = null;
   $('q').textContent = 'STREET · ' + (street.place.name || 'HERE').toUpperCase() + ' · GOOGLE STREET VIEW' + (cur.date ? ' ' + cur.date : '');
@@ -1537,7 +1543,7 @@ function gsvPrefetch() {
     if (!nxt) { job.dead = true; return; }
     if (!street.active || street.pending !== job) return;
     await gsvLoad(street.box, nxt);
-    if (street.pending === job) { job.cur = nxt; job.hop = Math.min(45, Math.max(10, haversine(from, nxt))); job.ready = true; }
+    if (street.pending === job) { job.cur = nxt; job.hop = Math.min(30, Math.max(6, haversine(from, nxt))); street.hop = job.hop; job.ready = true; }
   }).catch(() => { if (street.pending === job) street.pending = null; });
 }
 function loadPanoTexture(im) {
@@ -1634,7 +1640,12 @@ function streetUpdate(dt) {
   if (street.box) {
     // The box sits on the road axis at the Street View camera height and only travels forward with the runner, so a
     // lane step, a jump or a duck moves the eye through the picture and the photo shifts along with the road.
-    street.box.position.set(0, ROOM_H / 2, camera.position.z);
+    // walk forward through the photo: by the time the next photo is due, the eye has covered the real distance to
+    // the next panorama, so the ground flows past and the next photo appears from where the eye has got to
+    const hop = (street.pending && street.pending.hop) || street.hop || 15;
+    const frac = state.mode === 'run' ? clamp((state.traveled - (street.swapAt || street.runStart)) / GSV_SWAP, 0, 1) : 0;
+    street.drift = hop * frac;
+    street.box.position.set(0, ROOM_H / 2, camera.position.z + street.drift - ROOM_CZ);
     street.box.rotation.y = street.box.userData.yaw || 0;
     roadFade.value = street.source ? 1 : 0;
     // curvature from the heading change to the next panorama over the distance between them (an arc: x = k * d^2)
@@ -1646,7 +1657,7 @@ function streetUpdate(dt) {
     roadBend.value = street.source === 'google' ? street.bend : 0;
   }
   if (street.fade > 0 && street.fade < 1) {
-    street.fade = Math.min(1, street.fade + dt / 0.7);
+    street.fade = Math.min(1, street.fade + dt / 0.9);
     if (street.source === 'google') { setBoxMix(street.box, street.fade); if (street.fade >= 1) commitBox(street.box); }
     else { street.skyB.material.opacity = street.fade; if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; } }
   }
@@ -1749,7 +1760,7 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
 const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0, turbo: 0, nextBoostD: 220 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
-window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade, spawnTrain, spawnBoost, spawnBarrier, state, get carProto() { return carProto; } };
+window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade, roadBend, spawnTrain, spawnBoost, spawnBarrier, state, segments, get carProto() { return carProto; } };
 window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
 let lights, runner, dust;
