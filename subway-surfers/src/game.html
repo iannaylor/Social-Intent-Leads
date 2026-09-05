@@ -1306,7 +1306,11 @@ const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng
 const GSV_RADIUS = 1500, GSV_SWAP = 150;
 const GSV_R = 12, STREET_EYE = 2.6;
 // how far the eye travels toward a side lane in Street mode (1 = the full 2.6 m, 0 = stays on the road axis); ?follow=0.35 to tune
-const STREET_FOLLOW = (() => { const v = parseFloat(new URLSearchParams(location.search).get('follow')); return isNaN(v) ? 0.5 : Math.max(0, Math.min(1, v)); })();   // the photo box is 12 m around the road and fixed in the world at the Street View camera height, so the eye moves through it like a room   // search radius for the first photo; metres of running between photos
+const STREET_FOLLOW = (() => { const v = parseFloat(new URLSearchParams(location.search).get('follow')); return isNaN(v) ? 0 : Math.max(0, Math.min(1, v)); })();
+// Street mode lane change: the eye stays on the road axis and the whole view pans toward the lane, so the road keeps its
+// exact shape and the picture shifts as one; 0.75 pans as if looking at your lane 12 m ahead. ?turn=N to tune.
+const STREET_TURN = (() => { const v = parseFloat(new URLSearchParams(location.search).get('turn')); return isNaN(v) ? 0.75 : Math.max(0, Math.min(2, v)); })();
+const STREET_RISE = 0.35;   // how much of a jump or duck the eye follows in Street mode: enough to feel it, not enough to throw the road around   // the photo box is 12 m around the road and fixed in the world at the Street View camera height, so the eye moves through it like a room   // search radius for the first photo; metres of running between photos
 const GSV_LIFT = (() => { const v = parseFloat(new URLSearchParams(location.search).get('lift')); return isNaN(v) ? 0 : v; })();   // metres the photo is raised above the eye (0 keeps both roads' vanishing points together); ?lift=N to experiment
 const angDiff = (a, b) => { const d = (((a - b) % 360) + 360) % 360; return d > 180 ? 360 - d : d; };
 const gsvPt = (m, heading) => ({ pano: m.pano_id, lat: m.location.lat, lng: m.location.lng, heading, date: m.date || '' });
@@ -1943,19 +1947,19 @@ function update(dt) {
   if (view === 'fp') {
     const rolling = player.rolling > 0;
     const eyeBase = street.active ? STREET_EYE : 1.62;   // Street View car camera height, so the photo's ground and the game's ground coincide
-    const eyeTarget = rolling ? eyeBase - 0.9 : eyeBase;
+    const eyeTarget = rolling ? eyeBase - 0.9 * (street.active ? STREET_RISE : 1) : eyeBase;
     player.eye = lerp(player.eye === undefined ? eyeTarget : player.eye, eyeTarget, Math.min(1, dt * 14));
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
     const lean = (LANE_X[player.lane] - player.x) * 0.09;
     const follow = street.active ? STREET_FOLLOW : 1;
-    let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
+    let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y * (street.active ? STREET_RISE : 1) + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
     let roll = (street.active ? 0 : -lean) + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0);
     // Street mode: the gaze angle never changes; a jump or a duck is a pure vertical move of the eye, so the world shifts as one
     let pitchY = ey - 0.35 + (street.active ? 0 : (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3));
     if (state.mode === 'dead') { const t = Math.min(1, state.deathT * 1.6); ey = lerp(ey, 0.55, t); ez += t * 1.2; roll += t * 0.9; pitchY = lerp(pitchY, 3.5, t); }
     camera.position.set(ex, ey, ez);
-    camera.lookAt(street.active ? ex : player.x + lean * 3, pitchY, -9);   // Street mode: look dead ahead, so a lane change slides the eye without turning it
+    camera.lookAt(street.active ? ex + player.x * STREET_TURN : player.x + lean * 3, pitchY, -9);
     camera.rotateZ(roll);
     camera.fov = 68 + speed * 0.28;
   } else {
