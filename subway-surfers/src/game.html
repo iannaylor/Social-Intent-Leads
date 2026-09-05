@@ -1308,7 +1308,7 @@ async function gsvMeta(lat, lng, radius) {
   return j;
 }
 const moveLL = (lat, lng, north, east) => ({ lat: lat + north / 111320, lng: lng + east / (111320 * Math.cos(lat * Math.PI / 180)) });
-const GSV_RADIUS = 1500, GSV_SWAP = 120;
+const GSV_RADIUS = 1500, GSV_SWAP = 60;   // metres of running per photo: the eye walks the real gap to the next panorama in that distance
 const GSV_R = 12, STREET_EYE = 2.6;
 // how far the eye travels toward a side lane in Street mode (1 = the full 2.6 m, 0 = stays on the road axis); ?follow=0.35 to tune
 const STREET_FOLLOW = (() => { const v = parseFloat(new URLSearchParams(location.search).get('follow')); return isNaN(v) ? 0 : Math.max(0, Math.min(1, v)); })();
@@ -1657,7 +1657,7 @@ function streetUpdate(dt) {
     roadBend.value = street.source === 'google' ? street.bend : 0;
   }
   if (street.fade > 0 && street.fade < 1) {
-    street.fade = Math.min(1, street.fade + dt / 0.9);
+    street.fade = Math.min(1, street.fade + dt / 0.6);
     if (street.source === 'google') { setBoxMix(street.box, street.fade); if (street.fade >= 1) commitBox(street.box); }
     else { street.skyB.material.opacity = street.fade; if (street.fade >= 1) { const t = street.sky; street.sky.visible = false; street.sky = street.skyB; street.skyB = t; street.skyB.material.opacity = 0; } }
   }
