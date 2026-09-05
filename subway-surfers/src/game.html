@@ -80,8 +80,10 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   .street button.small{font-size:14px;padding:7px 12px 5px;letter-spacing:.12em;flex:none;box-shadow:0 2px 0 #6f6a61}
   .street .note{font-size:11px;line-height:1.4;color:var(--ink-dim);margin-top:8px}
   .street .note b{color:var(--sodium);font-weight:600}
-  .street .fields{display:none}
-  .street.on .fields{display:block}
+  .street button.wide{display:block;width:100%;margin-top:10px;font-size:18px;letter-spacing:.18em;padding:11px 12px 9px;box-shadow:0 3px 0 #6f6a61}
+  .street .row{margin-top:0}
+  .ghost{background:transparent;color:var(--ink-dim);box-shadow:none;font-size:13px;letter-spacing:.18em;padding:8px 14px 6px;border:1px solid var(--plate-edge)}
+  .ghost:hover{background:#1b1e22;color:var(--ink)}
   #err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-width:80vw;text-align:center;color:var(--ink);font-size:14px;line-height:1.5;display:none}
   #build{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:10px;letter-spacing:.15em;color:var(--ink-dim);opacity:.45;pointer-events:none}
   #q{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:12px;letter-spacing:.2em;color:var(--ink-dim);opacity:.6;pointer-events:none}
@@ -108,22 +110,20 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   <div class="card">
     <div class="bullet">I</div>
     <h1>INDI’S WIPEOUT</h1>
-    <div class="sub">DOWNTOWN · ALL STOPS</div>
-    <ul class="rules">
-      <li><b>◀ ▶ LANES</b>Swipe or arrow keys to change track.</li>
-      <li><b>▲ JUMP</b>Clear the hurdles. Ride the ramps onto the cars.</li>
-      <li><b>▼ ROLL</b>Duck under the clearance gates. Drop fast mid-air.</li>
-      <li><b>▶ TRAINS</b>Stopped cars are a roof. Moving cars are the end.</li>
-    </ul>
+    <div class="sub">YOUR STREET · YOUR RUN</div>
     <div class="street" id="streetBox">
-      <label class="t"><input type="checkbox" id="streetOn"> STREET MODE</label>
-      <div class="fields">
-        <div class="row"><input type="text" id="pc" placeholder="Postcode or address" autocomplete="postal-code"><button class="small" id="btnLoc" type="button">MY LOCATION</button></div>
-        <div class="row"><input type="text" id="mly" placeholder="Mapillary access token (MLY|…)"></div>
-        <div class="note" id="streetNote">Run down a real street with 360° photos of the place you choose wrapped around you. Type a postcode or address, or use MY LOCATION.</div>
-      </div>
+      <div class="row"><input type="text" id="pc" placeholder="Your postcode or address" autocomplete="postal-code" enterkeyhint="go"><button class="small" id="btnStart" type="button">GO</button></div>
+      <button class="wide" id="btnLoc" type="button">USE MY LOCATION</button>
+      <input type="text" id="mly" hidden>
+      <div class="note" id="streetNote">Run down your own street, wrapped in real photos of it. Type a postcode and GO, or use your location and the run starts by itself.</div>
     </div>
-    <button id="btnStart">START RUN</button>
+    <ul class="rules">
+      <li><b>◀ ▶ LANES</b>Swipe or arrow keys to change lane.</li>
+      <li><b>▲ JUMP</b>Clear the hurdles and the parked cars.</li>
+      <li><b>▼ ROLL</b>Duck under the clearance gates. Drop fast mid-air.</li>
+      <li><b>● TURBO</b>Grab the can: double points, super jump, coin magnet.</li>
+    </ul>
+    <button class="ghost" id="btnTunnel" type="button">OR RUN THE TUNNEL INSTEAD</button>
   </div>
 </div>
 <div id="street"></div>
@@ -1784,19 +1784,20 @@ function resetWorld() {
   updateHUD();
 }
 let streetPlace = null;
-async function startRun() {
-  if ($('streetOn').checked) {
-    if (!streetPlace && !$('pc').value.trim()) { setStreetStatus('Enter a postcode or address, or use MY LOCATION.', true); return; }
-    $('btnStart').disabled = true;
+/* Street first: GO with a postcode, or USE MY LOCATION, starts a street run; the tunnel is the alternative */
+async function startRun(mode) {
+  if (mode !== 'tunnel') {
+    if (!streetPlace && !$('pc').value.trim()) { setStreetStatus('Type a postcode or address and GO, or use your location.', true); return; }
+    $('btnStart').disabled = true; $('btnLoc').disabled = true;
     try {
       if (!streetPlace || streetPlace.query !== $('pc').value.trim()) { setStreetStatus('Looking up ' + $('pc').value.trim() + '…'); streetPlace = Object.assign(await geocode($('pc').value.trim()), { query: $('pc').value.trim() }); }
       if (!street.active || street.place !== streetPlace) { await startStreet(streetPlace); }
     } catch (e) {
       const blocked = /claude/.test(location.hostname) || (e && /Failed to fetch|NetworkError/.test(e.message || ''));
       setStreetStatus(blocked ? 'Street mode cannot look up places inside this frame. Open the hosted copy.' : (e.message || 'Street mode failed.'), true);
-      $('btnStart').disabled = false; return;
+      $('btnStart').disabled = false; $('btnLoc').disabled = false; return;
     }
-    $('btnStart').disabled = false;
+    $('btnStart').disabled = false; $('btnLoc').disabled = false;
   } else if (street.active) { stopStreet(); }
   beginRun();
 }
@@ -1845,12 +1846,12 @@ window.addEventListener('pointerup', (e) => {
   if (Math.max(ax, ay) < 24) { if (state.mode === 'idle') startRun(); return; }
   if (ax > ay) { if (dx < 0) doLeft(); else doRight(); } else { if (dy < 0) doJump(); else doRoll(); }
 });
-$('btnStart').addEventListener('click', startRun);
+$('btnStart').addEventListener('click', () => startRun('street'));
+$('btnTunnel').addEventListener('click', () => startRun('tunnel'));
 $('btnAgain').addEventListener('click', startRun);
 $('btnMenu').addEventListener('click', () => { state.mode = 'idle'; $('dead').classList.remove('on'); $('hud').classList.remove('on'); $('best').classList.remove('on'); $('view').classList.remove('on'); $('start').classList.add('on'); });
-$('streetOn').addEventListener('change', () => { $('streetBox').classList.toggle('on', $('streetOn').checked); });
-$('btnLoc').addEventListener('click', async () => { try { setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); $('pc').value = ''; setStreetStatus('Location found. Press START RUN.'); } catch (e) { setStreetStatus(e.message, true); } });
-$('pc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startRun(); } e.stopPropagation(); });
+$('btnLoc').addEventListener('click', async () => { try { $('btnLoc').disabled = true; setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); $('pc').value = ''; $('btnLoc').disabled = false; startRun('street'); } catch (e) { $('btnLoc').disabled = false; setStreetStatus(e.message, true); } });
+$('pc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startRun('street'); } e.stopPropagation(); });
 $('mly').addEventListener('keydown', (e) => e.stopPropagation());
 $('view').addEventListener('click', () => setView(view === 'fp' ? 'tp' : 'fp'));
 
@@ -2095,8 +2096,8 @@ async function boot() {
   resetWorld();
   window.addEventListener('resize', onResize);
   try { const t = localStorage.getItem('indiswipeout.mly') || (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || ''; if (t) $('mly').value = t; } catch (e) { /* ignore */ }
-  if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) { $('mly').value = window.INDI_CONFIG.mapillaryToken; $('mly').parentElement.style.display = 'none'; }
-  const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) { $('pc').value = qm.get('pc'); $('streetOn').checked = true; $('streetBox').classList.add('on'); }
+  if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) { $('mly').value = window.INDI_CONFIG.mapillaryToken; }
+  const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) $('pc').value = qm.get('pc');
   setProgress(1, 'READY');
   $('loading').classList.add('off'); $('start').classList.add('on');
   requestAnimationFrame(frame);
