@@ -1392,16 +1392,50 @@ function chooseLink(p, want, exclude) {
   for (const l of p.links) { const d = angDiff(l.heading, want) + (exclude.has(l.pano) ? 1000 : 0); if (d < bd) { bd = d; best = l; } }
   return best;
 }
+/* panorama data is cached by id: route planning looks several hops ahead and the run then walks the same panoramas */
+const panoCache = new Map();
+function gsvDataCached(pano) { if (!panoCache.has(pano)) panoCache.set(pano, gsvData({ pano })); return panoCache.get(pano); }
+/* How far the road runs on from `p` in direction `heading` before it dead-ends or forces a turn sharper than 55
+   degrees: the measure of a good running road. Counts hops (panoramas are roughly 10 to 20 m apart). */
+async function runLength(p, heading, visited, maxHops) {
+  let cur = p, h = heading, n = 0; const seen = new Set(visited); seen.add(cur.pano);
+  while (n < maxHops) {
+    const l = chooseLink(cur, h, seen);
+    if (!l || seen.has(l.pano) || angDiff(l.heading, h) > 55) break;
+    cur = await gsvDataCached(l.pano); h = l.heading; n++; seen.add(cur.pano);
+  }
+  return n;
+}
+/* the outgoing link from `p` that keeps the run going: among the links roughly ahead (within 80 degrees of `want`),
+   the one with the longest straight run beyond it; straightest wins a tie */
+async function bestLink(p, want, exclude, lookahead) {
+  const cands = p.links.filter((l) => !exclude.has(l.pano) && angDiff(l.heading, want) <= 80);
+  if (!cands.length) return chooseLink(p, want, exclude);
+  if (cands.length === 1) return cands[0];
+  const scored = await Promise.all(cands.map(async (l) => ({ l, run: await runLength(await gsvDataCached(l.pano), l.heading, [...exclude, p.pano], lookahead), dev: angDiff(l.heading, want) })));
+  scored.sort((a, b) => b.run - a.run || a.dev - b.dev);
+  return scored[0].l;
+}
 async function gsvFindLinked(lat, lng) {
   const p = await gsvData({ location: { lat, lng }, radius: GSV_RADIUS, source: google.maps.StreetViewSource.OUTDOOR, preference: google.maps.StreetViewPreference.NEAREST });
-  const l = chooseLink(p, p.center, new Set());        // set off the way the car was driving
-  p.linkOut = l ? l.heading : null; p.heading = p.center; p.nextPano = l ? l.pano : null;   // the car's own facing is the road direction here
+  panoCache.set(p.pano, Promise.resolve(p));
+  // which way to set off? look ten panoramas along each link and take the direction that runs on longest without a
+  // dead end or a forced turn, so the run heads for a through road rather than a cul-de-sac; the car's own facing
+  // breaks ties
+  let l = null;
+  if (p.links.length) {
+    const scored = await Promise.all(p.links.map(async (lk) => ({ lk, run: await runLength(await gsvDataCached(lk.pano), lk.heading, [p.pano], 10), dev: angDiff(lk.heading, p.center) })));
+    scored.sort((a, b) => b.run - a.run || a.dev - b.dev);
+    l = scored[0].lk;
+  }
+  p.linkOut = l ? l.heading : null; p.nextPano = l ? l.pano : null;
+  p.heading = l && angDiff(l.heading, p.center) > 90 ? l.heading : p.center;   // face the way we are going
   return p;
 }
 async function gsvNextLinked(cur, exclude) {
   if (!cur.nextPano) return null;
-  const p = await gsvData({ pano: cur.nextPano });
-  const l = chooseLink(p, cur.linkOut || cur.heading, new Set([...exclude, cur.pano]));   // keep going the same way through bends and junctions
+  const p = await gsvDataCached(cur.nextPano);
+  const l = await bestLink(p, cur.linkOut || cur.heading, new Set([...exclude, cur.pano]), 6);   // keep to the road that goes somewhere
   // face along the road's tangent here: halfway between the way we arrived and the way we leave
   p.linkOut = l ? l.heading : null; p.heading = l ? meanAngle(cur.linkOut || cur.heading, l.heading) : (cur.linkOut || cur.heading); p.nextPano = l ? l.pano : null;
   return p;
@@ -1606,7 +1640,7 @@ function streetUpdate(dt) {
     // curvature from the heading change to the next panorama over the distance between them (an arc: x = k * d^2)
     if (street.linked && street.gsv && street.pending && street.pending.ready && street.pending.cur) {
       const dh = ((street.pending.cur.heading - street.gsv.heading + 540) % 360) - 180, hop = street.pending.hop || 20;
-      street.bendTarget = clamp(dh * Math.PI / 180 / hop, -0.008, 0.008) * 0.5;
+      street.bendTarget = clamp(dh * Math.PI / 180 / hop, -0.012, 0.012) * 0.5;
     }
     street.bend = lerp(street.bend || 0, street.bendTarget || 0, Math.min(1, dt * 1.5));
     roadBend.value = street.source === 'google' ? street.bend : 0;
