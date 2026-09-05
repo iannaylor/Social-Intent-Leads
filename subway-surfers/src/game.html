@@ -1230,6 +1230,13 @@ const STREET_COIN_SCALE = 0.8;
    end aims where the photo's road goes rather than into a house. Obstacles are bent by the same rule. */
 const roadFade = { value: 0 }, roadBend = { value: 0 };
 const bendX = (z) => { const dz = Math.max(0, -z - 2); return roadBend.value * dz * dz; };
+/* Street mode: things on the road only appear where the road itself is visible (it dissolves beyond 35 to 75 m), growing
+   in between 62 and 48 m, so nothing sits in front of a house or hedge that the bend would really put it behind */
+function streetReveal(g, z) {
+  if (!street.active) { if (!g.visible) g.visible = true; if (g.scale.x !== 1) g.scale.setScalar(1); return; }
+  const k = clamp((62 + z) / 14, 0, 1);   // z is negative ahead
+  g.visible = k > 0.001; g.scale.setScalar(Math.max(0.001, k));
+}
 function fadeWithDistance(mat) {
   mat.transparent = true;
   mat.onBeforeCompile = (sh) => {
@@ -1430,6 +1437,25 @@ async function gsvFindLinked(lat, lng) {
   }
   p.linkOut = l ? l.heading : null; p.nextPano = l ? l.pano : null;
   p.heading = l && angDiff(l.heading, p.center) > 90 ? l.heading : p.center;   // face the way we are going
+  // back up about 100 m along the road so the place asked for lies ahead and the run passes it, rather than
+  // starting beside it with it out of view
+  if (l) {
+    let cur = p, back = l.heading + 180, dist = 0; const path = [p], seen = new Set([p.pano]);
+    while (dist < 100 && path.length < 12) {
+      const bl = chooseLink(cur, back, seen);
+      if (!bl || seen.has(bl.pano) || angDiff(bl.heading, back) > 40) break;
+      const nx = await gsvDataCached(bl.pano);
+      dist += haversine(cur, nx); back = bl.heading; seen.add(nx.pano); path.push(nx); cur = nx;
+    }
+    if (path.length > 1) {
+      const start = path[path.length - 1], toward = path[path.length - 2];
+      const lk = start.links.find((k) => k.pano === toward.pano);
+      start.linkOut = lk ? lk.heading : bearing(start, toward); start.nextPano = toward.pano;
+      start.heading = angDiff(start.linkOut, start.center) > 90 ? start.linkOut : start.center;
+      start.backedUp = Math.round(dist);
+      return start;
+    }
+  }
   return p;
 }
 async function gsvNextLinked(cur, exclude) {
@@ -1597,7 +1623,7 @@ async function startStreet(place) {
       try { await loadGmaps(); cur = await gsvFindLinked(place.lat, place.lon); street.linked = true; }
       catch (e) { street.linked = false; console.warn('[street] linked lookup failed, probing instead:', e.message); }
       if (!cur) cur = await gsvFind(place.lat, place.lon);
-      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; setStreetStatus('Street View found. Run!'); }
+      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; setStreetStatus(cur.backedUp ? 'Street View found. Starting ' + cur.backedUp + ' m up the road so you run past the spot. Run!' : 'Street View found. Run!'); }
       else gerr = 'Google has no Street View within ' + GSV_RADIUS + ' m of ' + (place.name || 'here') + '.';
     } catch (e) { gerr = e.message; }
   }
@@ -1916,7 +1942,7 @@ function update(dt) {
     if (t.moving && z < 2 && (!nearestMoving || z > nearestMoving.z)) nearestMoving = { t, z };
   }
   for (let i = barriers.length - 1; i >= 0; i--) {
-    const b = barriers[i]; const z = -(b.d - state.traveled); b.g.position.z = z; b.g.position.x = LANE_X[b.lane] + bendX(z);
+    const b = barriers[i]; const z = -(b.d - state.traveled); b.g.position.z = z; b.g.position.x = LANE_X[b.lane] + bendX(z); streetReveal(b.g, z);
     if (z > 12) { barriers.splice(i, 1); b.g.visible = false; pools.barrier[b.type].push(b); }
   }
   const spin = state.time * 3.2;
@@ -1924,12 +1950,12 @@ function update(dt) {
     const c = coins[i]; const z = -(c.d - state.traveled); c.g.rotation.y = spin + c.d * 0.3;
     if (z > 8) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); continue; }
     if (run && state.turbo > 0 && z > -10 && z < 2) { const k = Math.min(1, dt * 7); c.gx += (player.x - c.gx) * k; c.y += (player.y + 1.0 - c.y) * k; }   // turbo magnet
-    c.g.position.set(c.gx + bendX(z), c.y, z);
+    c.g.position.set(c.gx + bendX(z), c.y, z); streetReveal(c.g, z);
     if (run && Math.abs(z) < 0.9 && Math.abs(c.gx - player.x) < 1.0 && c.y > player.y - 0.2 && c.y < player.y + 2.0) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); state.coins++; state.score += state.turbo > 0 ? 50 : 25; sfxCoin(); }
   }
   for (let i = boosts.length - 1; i >= 0; i--) {
     const b = boosts[i]; const z = -(b.d - state.traveled);
-    b.g.position.set(LANE_X[b.lane] + bendX(z), 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin;
+    b.g.position.set(LANE_X[b.lane] + bendX(z), 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin; streetReveal(b.g, z);
     if (z > 8) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); continue; }
     if (run && Math.abs(z) < 1.0 && Math.abs(LANE_X[b.lane] - player.x) < 1.1 && player.y < 2.2) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); state.turbo = TURBO_T; state.score += 100; sfxBoost(); }
   }
