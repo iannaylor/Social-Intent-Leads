@@ -21,7 +21,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   }
   html,body{margin:0;height:100%;background:var(--ground);color:var(--ink);overflow:hidden;font-family:var(--mono);-webkit-user-select:none;user-select:none;touch-action:none}
   #c{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:1}
-  #hud,#best,#hint,#q,#view,.overlay,#loading,#err,#fade{z-index:2}
+  #hud,#best,#hint,#q,#turbo,#build,#view,.overlay,#loading,#err,#fade{z-index:2}
   #hud{position:fixed;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));display:flex;gap:10px;pointer-events:none;opacity:0;transition:opacity .4s}
   #hud.on{opacity:1}
   .plate{background:linear-gradient(180deg,#15181b,#0c0e10);border:1px solid var(--plate-edge);box-shadow:0 0 0 3px #060708,0 6px 18px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);padding:8px 14px 6px;min-width:120px}
@@ -33,6 +33,9 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #best.on{opacity:1}
   #view{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));min-width:0;padding:6px 12px 4px;opacity:0;transition:opacity .4s;cursor:pointer}
   #view.on{opacity:1}
+  #turbo{position:fixed;left:50%;transform:translateX(-50%);bottom:max(48px,calc(env(safe-area-inset-bottom) + 30px));width:min(420px,70vw);font-family:var(--display);font-size:13px;letter-spacing:.22em;color:#ffb060;text-align:center;opacity:0;transition:opacity .25s;pointer-events:none;text-shadow:0 2px 8px #000}
+  #turbo.on{opacity:1}
+  #turbo i{display:block;height:5px;margin-top:6px;background:linear-gradient(90deg,#ff6a00,#ffd27a);box-shadow:0 0 12px #ff8a2a;border-radius:3px}
   #hint{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--ink-dim);opacity:0;transition:opacity .6s;pointer-events:none;text-shadow:0 2px 6px #000}
   #hint.on{opacity:.85}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:16px 0;box-sizing:border-box;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
@@ -90,6 +93,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   <div class="plate coins"><div class="lbl">COINS</div><div class="val" id="coins">0</div></div>
 </div>
 <div id="best" class="plate"><div class="lbl">BEST</div><div class="val" id="bestv">000000</div></div>
+<div id="turbo"><span>TURBO · DOUBLE POINTS · SUPER JUMP</span><i></i></div>
 <div id="hint">SWIPE OR ARROW KEYS · SPACE JUMP · DOWN ROLL</div>
 <div id="q"></div>
 <div id="build"></div>
@@ -597,6 +601,12 @@ function buildMaterials() {
   M.trainFront = std({ map: T.trainFront, emissiveMap: T.trainFrontE, emissive: 0xffffff, emissiveIntensity: 3.2, roughness: 0.5, metalness: 0.6, envMapIntensity: 0.9 });
   M.trainUnder = std({ color: 0x151618, roughness: 0.9, metalness: 0.5, envMapIntensity: 0.3 });
   M.wheel = std({ color: 0x3a3c3f, roughness: 0.4, metalness: 0.9, envMapIntensity: 0.8 });
+  M.busRed = std({ color: 0xb3232a, roughness: 0.32, metalness: 0.15, envMapIntensity: 0.9 });
+  M.busBlue = std({ color: 0x1f3f7a, roughness: 0.32, metalness: 0.15, envMapIntensity: 0.9 });
+  M.busCream = std({ color: 0xd9d2bd, roughness: 0.4, metalness: 0.1, envMapIntensity: 0.8 });
+  M.headlamp = std({ color: 0xfff6dc, emissive: 0xfff1c8, emissiveIntensity: 1.2, roughness: 0.2, metalness: 0.2 });
+  M.boostCan = std({ color: 0xff7a1a, emissive: 0xff5a00, emissiveIntensity: 1.6, roughness: 0.25, metalness: 0.6, envMapIntensity: 1.2 });
+  M.boostRing = new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
   M.glass = std({ color: 0x0a0d12, roughness: 0.06, metalness: 0.9, transparent: true, opacity: 0.42, envMapIntensity: 1.8, depthWrite: false });
   M.hazard = std({ map: T.hazard, roughness: 0.75, metalness: 0.35, normalMap: nmap('nDiamond', [2, 2]), normalScale: new THREE.Vector2(0.8, 0.8), envMapIntensity: 0.6 });
   M.fence = std({ map: T.fence, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.9, envMapIntensity: 0.8 });
@@ -714,6 +724,9 @@ function puddleGeometry() {
   const s = new THREE.Shape(pts); const g = new THREE.ShapeGeometry(s, 4); g.rotateX(-Math.PI / 2); return g;
 }
 function rampGeometry() {
+  G.busWheel = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 20); G.busWheel.rotateZ(Math.PI / 2);
+  G.boostCan = new THREE.CylinderGeometry(0.2, 0.2, 0.62, 18);
+  G.boostRing = new THREE.TorusGeometry(0.5, 0.035, 8, 40);
   const L = RAMP_LEN, H = TRAIN_TOP, W = TRAIN_W * 0.5;
   const p = [[-W, 0, 0], [W, 0, 0], [W, H, -L], [-W, 0, 0], [W, H, -L], [-W, H, -L], [-W, 0, 0], [-W, H, -L], [-W, 0, -L], [W, 0, 0], [W, 0, -L], [W, H, -L], [-W, 0, -L], [-W, H, -L], [W, H, -L], [-W, 0, -L], [W, H, -L], [W, 0, -L]];
   const uv = []; for (const v of p) uv.push((v[0] + W) / (2 * W) * 2, (-v[2]) / L * 6);
@@ -916,7 +929,8 @@ function segLamps(seg) { return seg.kind === 'tunnel' ? seg.tunLamps : seg.kind 
    Obstacles
    ============================================================ */
 const trains = [], barriers = [], coins = [];
-const pools = { train: {}, barrier: {}, coin: [] };
+const pools = { train: {}, bus: {}, barrier: {}, coin: [], boost: [] };
+const boosts = [];
 const obstacleRoot = new THREE.Group(); scene.add(obstacleRoot);
 
 function makeTrain(len) {
@@ -944,10 +958,30 @@ function makeTrain(len) {
   obstacleRoot.add(g);
   return { g, ramp, head, len };
 }
+function makeBus(len) {
+  const g = new THREE.Group(), paint = pick([M.busRed, M.busBlue, M.busCream]);
+  const n = Math.round(len / 12);
+  for (let b = 0; b < n; b++) {
+    const z0 = -(b * 12), L = 12 - 0.5;
+    const body = new THREE.Mesh(new THREE.RoundedBoxGeometry(TRAIN_W, TRAIN_BODY_H, L, 3, 0.22), [paint, paint, M.trainRoof, M.trainUnder, paint, paint]);
+    body.castShadow = true; body.receiveShadow = true; body.position.set(0, TRAIN_LIFT + TRAIN_BODY_H / 2, z0 - L / 2); g.add(body);
+    for (const sx of [-1, 1]) { const gl = new THREE.Mesh(new THREE.PlaneGeometry(L - 1.2, 1.05), M.glass); gl.position.set(sx * (TRAIN_W / 2 + 0.005), TRAIN_LIFT + TRAIN_BODY_H - 0.95, z0 - L / 2); gl.rotation.y = sx * Math.PI / 2; g.add(gl); }
+    const wind = new THREE.Mesh(new THREE.PlaneGeometry(TRAIN_W - 0.5, 1.3), M.glass); wind.position.set(0, TRAIN_LIFT + TRAIN_BODY_H - 0.95, z0 + 0.006); g.add(wind);
+    const rear = new THREE.Mesh(new THREE.PlaneGeometry(TRAIN_W - 0.7, 1.0), M.glass); rear.position.set(0, TRAIN_LIFT + TRAIN_BODY_H - 0.9, z0 - L - 0.006); rear.rotation.y = Math.PI; g.add(rear);
+    const bumper = mesh(new THREE.BoxGeometry(TRAIN_W - 0.1, 0.3, 0.2), M.steelDark, true, false); bumper.position.set(0, TRAIN_LIFT - 0.05, z0 + 0.05); g.add(bumper);
+    for (const wz of [z0 - 2.4, z0 - L + 2.2]) for (const wx of [-0.95, 0.95]) { const w = mesh(G.busWheel, M.wheel, false, false); w.position.set(wx, 0.5, wz); g.add(w); }
+    for (const lx of [-0.8, 0.8]) { const lamp = mesh(new THREE.BoxGeometry(0.34, 0.2, 0.06), M.headlamp, false, false); lamp.position.set(lx, TRAIN_LIFT + 0.55, z0 + 0.02); g.add(lamp); }
+  }
+  const ramp = mesh(G.ramp, M.hazard, true, true); ramp.position.set(0, 0, RAMP_LEN); g.add(ramp);
+  const head = new THREE.Sprite(M.spriteHead); head.position.set(0, TRAIN_LIFT + 0.6, 0.05); head.scale.set(3.0, 1.1, 1); g.add(head);
+  obstacleRoot.add(g);
+  return { g, ramp, head, len, kind: 'bus' };
+}
 function spawnTrain(lane, d, len, opts) {
-  const pool = pools.train[len] || (pools.train[len] = []);
-  const obj = pool.pop() || makeTrain(len);
-  obj.g.visible = true; obj.lane = lane; obj.d = d; obj.len = len;
+  const bank = opts.bus ? pools.bus : pools.train;
+  const pool = bank[len] || (bank[len] = []);
+  const obj = pool.pop() || (opts.bus ? makeBus(len) : makeTrain(len));
+  obj.pool = pool; obj.g.visible = true; obj.lane = lane; obj.d = d; obj.len = len;
   obj.moving = !!opts.moving; obj.vel = obj.moving ? rand(9, 14) : 0;
   obj.hasRamp = !!opts.ramp; obj.ramp.visible = obj.hasRamp; obj.head.visible = obj.moving;
   obj.g.position.x = LANE_X[lane];
@@ -993,8 +1027,20 @@ function spawnBarrier(lane, d, type) {
 function spawnCoin(lane, d, y) {
   let obj = pools.coin.pop();
   if (!obj) { const g = new THREE.Group(); g.add(mesh(G.coin, M.coin, true, false)); g.add(mesh(G.coinFace, M.coin, false, false)); obstacleRoot.add(g); obj = { g }; }
-  obj.g.visible = true; obj.lane = lane; obj.d = d; obj.y = y; obj.g.position.set(LANE_X[lane], y, 0);
+  obj.g.visible = true; obj.lane = lane; obj.d = d; obj.y = y; obj.gx = LANE_X[lane]; obj.g.position.set(LANE_X[lane], y, 0);
   coins.push(obj);
+}
+const TURBO_T = 7;
+function spawnBoost(lane, d) {
+  let obj = pools.boost.pop();
+  if (!obj) {
+    const g = new THREE.Group();
+    const can = mesh(G.boostCan, M.boostCan, true, false); g.add(can);
+    const ring = new THREE.Mesh(G.boostRing, M.boostRing); ring.rotation.x = Math.PI / 2; g.add(ring);
+    obstacleRoot.add(g); obj = { g, ring };
+  }
+  obj.g.visible = true; obj.lane = lane; obj.d = d; obj.g.position.set(LANE_X[lane], 1.1, 0);
+  boosts.push(obj);
 }
 function coinLine(lane, d, n, y) { for (let i = 0; i < n; i++) spawnCoin(lane, d + i * 1.7, y === undefined ? 1.0 : y); }
 function coinArc(lane, d) { const ys = [1.0, 1.5, 1.95, 2.2, 1.95, 1.5, 1.0]; for (let i = 0; i < ys.length; i++) spawnCoin(lane, d + i * 1.25, ys[i]); }
@@ -1049,18 +1095,35 @@ function spawnBand(d, difficulty) {
 
 function spawnStreetBand(d, difficulty) {
   const lanes = [0, 1, 2], sh = lanes.slice().sort(() => Math.random() - 0.5), r = Math.random();
-  if (r < 0.5) {
+  if (d > state.nextBoostD) { spawnBoost(sh[2], d - 8); state.nextBoostD = d + rand(280, 460); }
+  if (r < 0.3) {
+    // buses: parked ones you run up onto by their ramps and along their roofs, later an oncoming one to dodge
+    const n = Math.random() < 0.45 + difficulty * 0.3 ? 2 : 1; let maxLen = 0; const used = [];
+    for (let i = 0; i < n; i++) {
+      const lane = sh[i]; used.push(lane);
+      const oncoming = i === 1 && difficulty > 0.3 && Math.random() < 0.45;
+      const len = oncoming ? 12 : pick([12, 12, 24, 24, 36]); maxLen = Math.max(maxLen, len); const ramp = !oncoming && Math.random() < 0.65;
+      const t = spawnTrain(lane, d + (ramp ? RAMP_LEN : 0) + (oncoming ? 40 : 0), len, { ramp, bus: true, moving: oncoming });
+      if (oncoming) t.vel = rand(6, 9);
+      if (ramp) coinLine(lane, d + RAMP_LEN + 3, Math.floor((len - 6) / 1.7), TRAIN_TOP + 1.0);
+    }
+    for (const l of lanes.filter((x) => !used.includes(x))) {
+      if (Math.random() < 0.5) coinLine(l, d + 2, 6);
+      if (Math.random() < 0.4 + difficulty * 0.3) { const bt = pick(['hurdle', 'car', 'gate']); const bd = d + rand(10, Math.max(12, maxLen - 6)); spawnBarrier(l, bd, bt); if (bt === 'hurdle') coinArc(l, bd - 3.5); }
+    }
+    return maxLen + RAMP_LEN + 8;
+  } else if (r < 0.6) {
     const blocked = difficulty > 0.35 && Math.random() < 0.5 ? 2 : 1;
     for (let i = 0; i < blocked; i++) { const type = pick(['hurdle', 'gate', 'car', 'hurdle', 'gate', 'car', 'wall']); spawnBarrier(sh[i], d, type); if (type === 'hurdle' && Math.random() < 0.6) coinArc(sh[i], d - 3.5); }
     if (Math.random() < 0.7) coinLine(sh[blocked], d - 3, 5);
     return lerp(30, 18, difficulty);
-  } else if (r < 0.7) {
+  } else if (r < 0.76) {
     // parked cars staggered down one side, coins weaving between
     const side = Math.random() < 0.5 ? 0 : 2, n = irand(2, 3 + Math.round(difficulty * 2));
     for (let i = 0; i < n; i++) spawnBarrier(i % 2 === 0 ? side : 1, d + i * 14, 'car');
     for (let i = 0; i < n; i++) coinLine(i % 2 === 0 ? (side === 0 ? 2 : 0) : 1, d + i * 14 - 4, 4);
     return n * 14 + 10;
-  } else if (r < 0.88) {
+  } else if (r < 0.9) {
     let lane = irand(0, 2); for (let i = 0; i < 3; i++) { coinLine(lane, d + i * 7, 4); lane = clamp(lane + (Math.random() < 0.5 ? -1 : 1), 0, 2); }
     return 26;
   } else {
@@ -1504,7 +1567,7 @@ function streetUpdate(dt) {
     street.box.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + (fading ? street.outDrift : street.drift));
     street.boxB.position.set(camera.position.x, camera.position.y + GSV_LIFT, camera.position.z + street.drift);
     // a sideways step swings nearby scenery the other way; the photo has no depth, so swing it as if it stood 25 m off
-    const swing = Math.atan(camera.position.x / 25);
+    const swing = Math.atan(camera.position.x / 18);
     street.box.rotation.y = (street.box.userData.yaw || 0) + swing; street.boxB.rotation.y = (street.boxB.userData.yaw || 0) + swing;
     roadFade.value = street.source ? 1 : 0;
   }
@@ -1600,6 +1663,7 @@ function beep(freq, dur, type, gain) {
   if (!actx) return;
   try { const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.value = freq; g.gain.setValueAtTime(gain || 0.08, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); } catch (e) { /* ignore */ }
 }
+const sfxBoost = () => { [660, 880, 1320, 1760].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'square', 0.05), i * 70)); };
 const sfxCoin = () => { beep(1320, 0.12, 'triangle', 0.05); setTimeout(() => beep(1760, 0.14, 'triangle', 0.04), 40); };
 const sfxJump = () => beep(220, 0.12, 'square', 0.025);
 const sfxHit = () => { beep(70, 0.5, 'sawtooth', 0.12); beep(50, 0.7, 'square', 0.08); };
@@ -1608,10 +1672,10 @@ const sfxStumble = () => beep(120, 0.2, 'sawtooth', 0.05);
 /* ============================================================
    Game state
    ============================================================ */
-const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0 };
+const state = { mode: 'idle', speed: 0, traveled: 0, spawnCursor: 0, score: 0, coins: 0, best: 0, time: 0, segIndex: 0, deathT: 0, hitFlash: 0, turbo: 0, nextBoostD: 220 };
 const player = { lane: 1, prevLane: 1, x: 0, y: 0, vy: 0, grounded: true, rolling: 0, fastFall: false, stumble: 0, runPhase: 0, camY: 0, camX: 0 };
 try { state.best = parseInt(localStorage.getItem('indiswipeout.best') || '0', 10) || 0; } catch (e) { state.best = 0; }
-window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade };
+window.ballastRun = state; window.indiStreet = street; window.indiDebug = { get renderer() { return renderer; }, M, roadFade, spawnTrain, spawnBoost, state };
 window.ballastDebug = { player, trains, barriers, coins, spawnTrain: (...a) => spawnTrain(...a), spawnBarrier: (...a) => spawnBarrier(...a) };
 
 let lights, runner, dust;
@@ -1621,7 +1685,9 @@ const fmt = (n) => String(Math.floor(n)).padStart(6, '0');
 function updateHUD() { $('score').textContent = fmt(state.score); $('coins').textContent = String(state.coins); $('bestv').textContent = fmt(state.best); }
 
 function resetWorld() {
-  for (const t of trains) { t.g.visible = false; pools.train[t.len].push(t); }
+  for (const t of trains) { t.g.visible = false; t.pool.push(t); }
+  for (const b of boosts) { b.g.visible = false; pools.boost.push(b); }
+  boosts.length = 0; state.turbo = 0; state.nextBoostD = 220;
   for (const b of barriers) { b.g.visible = false; pools.barrier[b.type].push(b); }
   for (const c of coins) { c.g.visible = false; pools.coin.push(c); }
   trains.length = 0; barriers.length = 0; coins.length = 0;
@@ -1670,7 +1736,7 @@ function die(cause) {
 /* ---- input */
 function doLeft() { if (state.mode !== 'run' || player.stumble > 0.25) return; if (player.lane > 0) { player.prevLane = player.lane; player.lane--; } }
 function doRight() { if (state.mode !== 'run' || player.stumble > 0.25) return; if (player.lane < 2) { player.prevLane = player.lane; player.lane++; } }
-function doJump() { if (state.mode !== 'run') return; if (player.grounded && player.rolling <= 0) { player.vy = JUMP_V; player.grounded = false; sfxJump(); } }
+function doJump() { if (state.mode !== 'run') return; if (player.grounded && player.rolling <= 0) { player.vy = JUMP_V * (state.turbo > 0 ? 1.42 : 1); player.grounded = false; sfxJump(); } }
 function doRoll() { if (state.mode !== 'run') return; if (player.grounded) { if (player.rolling <= 0) player.rolling = ROLL_TIME; } else player.fastFall = true; }
 const KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ']);
 window.addEventListener('keydown', (e) => {
@@ -1714,9 +1780,9 @@ function floorAt(x, y, dt) {
     const zFront = -(t.d - state.traveled), zBack = zFront - t.len;
     if (zFront >= pzB && zBack <= pzF) {
       if (y >= TRAIN_TOP - 0.75 && !t.moving) floor = Math.max(floor, TRAIN_TOP);
-      else if (t.moving) hit = { cause: 'HIT BY AN OUTBOUND TRAIN' };
-      else if (zFront < 0.35 + state.speed * dt) hit = { cause: 'HIT A PARKED TRAIN', frontal: true };
-      else hit = { cause: 'HIT A TRAIN', side: true, train: t };
+      else if (t.moving) hit = { cause: t.kind === 'bus' ? 'HIT BY AN ONCOMING BUS' : 'HIT BY AN OUTBOUND TRAIN' };
+      else if (zFront < 0.35 + state.speed * dt) hit = { cause: t.kind === 'bus' ? 'RAN INTO A PARKED BUS' : 'HIT A PARKED TRAIN', frontal: true };
+      else hit = { cause: t.kind === 'bus' ? 'CLIPPED A BUS' : 'HIT A TRAIN', side: true, train: t };
     } else if (t.hasRamp && zFront < pzB && zFront >= -RAMP_LEN - pzF) {
       // ramp runs from the train front (zFront, full height) back toward the player (zFront + RAMP_LEN, ground)
       const ry = clamp(TRAIN_TOP * (RAMP_LEN + zFront + pzF) / RAMP_LEN, 0, TRAIN_TOP);
@@ -1747,7 +1813,7 @@ function update(dt) {
   const speed = state.mode === 'idle' ? 5 : state.speed;
   const dz = speed * dt;
   state.traveled += dz;
-  if (run) state.score += dz * (1 + state.speed / MAX_SPEED);
+  if (run) state.score += dz * (1 + state.speed / MAX_SPEED) * (state.turbo > 0 ? 2 : 1);
   const difficulty = clamp((state.speed - START_SPEED) / (MAX_SPEED - START_SPEED), 0, 1);
   if (state.mode !== 'idle') while (state.spawnCursor - state.traveled < SPAWN_AHEAD) { const len = spawnBand(state.spawnCursor, difficulty); state.spawnCursor += len + rand(10, 22) - difficulty * 6; }
 
@@ -1760,7 +1826,7 @@ function update(dt) {
   for (let i = trains.length - 1; i >= 0; i--) {
     const t = trains[i]; if (t.moving) t.d -= t.vel * dt;
     const z = -(t.d - state.traveled); t.g.position.z = z;
-    if (z - t.len > 14) { trains.splice(i, 1); t.g.visible = false; pools.train[t.len].push(t); continue; }
+    if (z - t.len > 14) { trains.splice(i, 1); t.g.visible = false; t.pool.push(t); continue; }
     if (t.moving && z < 2 && (!nearestMoving || z > nearestMoving.z)) nearestMoving = { t, z };
   }
   for (let i = barriers.length - 1; i >= 0; i--) {
@@ -1769,10 +1835,20 @@ function update(dt) {
   }
   const spin = state.time * 3.2;
   for (let i = coins.length - 1; i >= 0; i--) {
-    const c = coins[i]; const z = -(c.d - state.traveled); c.g.position.z = z; c.g.rotation.y = spin + c.d * 0.3;
+    const c = coins[i]; const z = -(c.d - state.traveled); c.g.rotation.y = spin + c.d * 0.3;
     if (z > 8) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); continue; }
-    if (run && Math.abs(z) < 0.9 && Math.abs(LANE_X[c.lane] - player.x) < 1.0 && c.y > player.y - 0.2 && c.y < player.y + 2.0) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); state.coins++; state.score += 25; sfxCoin(); }
+    if (run && state.turbo > 0 && z > -10 && z < 2) { const k = Math.min(1, dt * 7); c.gx += (player.x - c.gx) * k; c.y += (player.y + 1.0 - c.y) * k; }   // turbo magnet
+    c.g.position.set(c.gx, c.y, z);
+    if (run && Math.abs(z) < 0.9 && Math.abs(c.gx - player.x) < 1.0 && c.y > player.y - 0.2 && c.y < player.y + 2.0) { coins.splice(i, 1); c.g.visible = false; pools.coin.push(c); state.coins++; state.score += state.turbo > 0 ? 50 : 25; sfxCoin(); }
   }
+  for (let i = boosts.length - 1; i >= 0; i--) {
+    const b = boosts[i]; const z = -(b.d - state.traveled);
+    b.g.position.set(LANE_X[b.lane], 1.1 + Math.sin(state.time * 3 + b.d) * 0.12, z); b.g.rotation.y = spin * 0.8; b.ring.rotation.z = spin;
+    if (z > 8) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); continue; }
+    if (run && Math.abs(z) < 1.0 && Math.abs(LANE_X[b.lane] - player.x) < 1.1 && player.y < 2.2) { boosts.splice(i, 1); b.g.visible = false; pools.boost.push(b); state.turbo = TURBO_T; state.score += 100; sfxBoost(); }
+  }
+  if (state.turbo > 0) { if (run) state.turbo = Math.max(0, state.turbo - dt); }
+  const tb = $('turbo'); if (tb) { tb.classList.toggle('on', state.turbo > 0); tb.querySelector('i').style.width = (state.turbo / TURBO_T * 100).toFixed(1) + '%'; }
 
   if (run) {
     const tx = LANE_X[player.lane];
@@ -1786,7 +1862,7 @@ function update(dt) {
     if (state.mode === 'run') {
       const floor = f.floor;
       if (player.y > floor + 0.001 || player.vy > 0) {
-        player.vy -= GRAVITY * (player.fastFall ? 2.6 : 1) * dt; player.y += player.vy * dt; player.grounded = false;
+        player.vy -= GRAVITY * (player.fastFall ? 2.6 : state.turbo > 0 ? 0.85 : 1) * dt; player.y += player.vy * dt; player.grounded = false;
         if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; player.fastFall = false; }
       } else { player.y = floor; player.grounded = true; player.vy = 0; }
       if (player.rolling > 0) player.rolling -= dt;
@@ -1847,7 +1923,7 @@ function update(dt) {
     const g = state.mode === 'run' && player.grounded && !rolling ? 1 : 0.3;
     const bobY = Math.sin(player.runPhase * 2) * 0.03 * g, bobX = Math.sin(player.runPhase) * 0.018 * g;
     const lean = (LANE_X[player.lane] - player.x) * 0.09;
-    const follow = street.active ? 0.55 : 1;   // in Street mode the eye follows the lane only partway: the photo has no depth to slide with
+    const follow = street.active ? 0.4 : 1;   // in Street mode the eye follows the lane only partway: the photo has no depth to slide with
     let ex = player.x * follow + bobX + (Math.random() - 0.5) * shake, ey = player.y + player.eye + bobY + (Math.random() - 0.5) * shake, ez = 0.15;
     let roll = -lean + (player.stumble > 0 ? Math.sin(player.stumble * 30) * 0.06 : 0);
     let pitchY = ey - 0.35 + (rolling ? -0.6 : 0) + clamp(player.vy * 0.04, -0.3, 0.3);
@@ -1887,6 +1963,7 @@ function update(dt) {
   gradePass.uniforms.time.value = state.time + performance.now() * 0.001;
   gradePass.uniforms.speedFx.value = difficulty;
   gradePass.uniforms.hit.value = state.hitFlash;
+  bloomPass.strength = (street.active ? 0.18 : 0.5) + (state.turbo > 0 ? 0.22 : 0);
   if (run && Math.floor(state.score) !== Math.floor(state.score - dz)) updateHUD();
 }
 
