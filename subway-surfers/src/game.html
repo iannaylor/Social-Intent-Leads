@@ -2171,7 +2171,7 @@ async function lbSubmit(run) {
     const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
     run.ranks = res; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
     if (res.player) lb.playerId = res.player; if (res.best) lb.best = res.best;
-    if (!res.v) { const d = document.createElement('div'); d.textContent = 'BOARDS NEED THE SCHEMA UPDATE'; d.style.color = '#e0705f'; $('rank').appendChild(d); }
+    if (!res.v) console.warn('[lb] the database is running an older submit_run: re-run supabase/schema.sql for ranks that leave out your own earlier runs');
   } catch (e) { console.warn('[lb] submit failed:', e.message); setRank(/implausible|too fast|daily/.test(e.message) ? 'RUN NOT COUNTED' : 'LEADERBOARD OFFLINE', true); }
   lb.busy = false;
 }
