@@ -1,6 +1,6 @@
-# Publishes subway-surfers/ (Indi's Wipeout) to GitHub Pages.
+# Publishes subway-surfers/ (Local Surfer) to GitHub Pages.
 # Enable once in the repo: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
-name: Deploy Indi's Wipeout to GitHub Pages
+name: Deploy Local Surfer to GitHub Pages
 on:
   push:
     branches: [main, claude/photorealistic-subway-surfers-5v46j2]

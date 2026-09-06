@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Indi’s Wipeout</title>
+<title>Local Surfer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EI%3C/text%3E%3C/svg%3E">
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
@@ -46,9 +46,9 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #turbo i{display:block;height:5px;margin-top:6px;background:linear-gradient(90deg,#ff6a00,#ffd27a);box-shadow:0 0 12px #ff8a2a;border-radius:3px}
   #hint{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--ink-dim);opacity:0;transition:opacity .6s;pointer-events:none;text-shadow:0 2px 6px #000}
   #hint.on{opacity:.85}
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:16px 0;box-sizing:border-box;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
-  .overlay.on{opacity:1;pointer-events:auto}
-  .card{width:min(92vw,460px);margin:auto;max-height:calc(100vh - 32px);overflow-y:auto;box-sizing:border-box;background:linear-gradient(180deg,#17191c,#0b0c0e);border:1px solid var(--plate-edge);box-shadow:0 0 0 4px #050607,0 30px 60px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.07);padding:28px 30px 26px;text-align:center;position:relative}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:16px 0;box-sizing:border-box;background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,.2),rgba(0,0,0,.72));opacity:0;pointer-events:none;transition:opacity .35s}
+  .overlay.on{opacity:1;pointer-events:auto;touch-action:pan-y}
+  .card{width:min(92vw,460px);margin:auto;box-sizing:border-box;background:linear-gradient(180deg,#17191c,#0b0c0e);border:1px solid var(--plate-edge);box-shadow:0 0 0 4px #050607,0 30px 60px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.07);padding:28px 30px 26px;text-align:center;position:relative}
   .card::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:repeating-linear-gradient(90deg,var(--sodium) 0 24px,#1a1a1a 24px 30px)}
   .bullet{width:64px;height:64px;border-radius:50%;background:var(--sodium);color:#111;font-family:var(--display);font-size:44px;line-height:64px;margin:6px auto 12px;box-shadow:0 0 0 3px #0b0c0e,0 0 0 5px var(--sodium),0 0 28px rgba(232,121,43,.45)}
   h1{font-family:var(--display);font-weight:400;font-size:52px;letter-spacing:.06em;margin:0;line-height:.95;text-wrap:balance}
@@ -82,7 +82,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   .tabs button{font-size:15px;letter-spacing:.12em;padding:7px 11px 5px;background:#1b1e22;color:#d6d0c4;box-shadow:none;border:1px solid var(--plate-edge);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tabs button.cur{background:var(--ink);color:#111}
   .tabs.period button{font-size:13px;padding:5px 10px 3px}
-  #boardList{list-style:none;margin:0 0 14px;padding:0;text-align:left;font-size:15px;max-height:44vh;overflow-y:auto;border-top:1px solid var(--plate-edge)}
+  #boardList{list-style:none;margin:0 0 14px;padding:0;text-align:left;font-size:15px;border-top:1px solid var(--plate-edge)}
   #boardList li{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:baseline;padding:6px 4px 4px;border-bottom:1px solid #1d2024;font-variant-numeric:tabular-nums}
   #boardList li.me{background:#1f1a12;color:var(--gold)}
   #boardList li .n{font-family:var(--display);font-size:16px;letter-spacing:.1em;color:var(--ink-dim)}
@@ -141,8 +141,8 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 
 <div id="start" class="overlay">
   <div class="card">
-    <div class="bullet">I</div>
-    <h1>INDI’S WIPEOUT</h1>
+    <div class="bullet">L</div>
+    <h1>LOCAL SURFER</h1>
     <div class="sub">YOUR STREET · YOUR RUN</div>
     <div class="street" id="streetBox">
       <div class="row"><input type="text" id="pc" placeholder="Your postcode or address" autocomplete="postal-code" enterkeyhint="go"><button class="small" id="btnStart" type="button">GO</button></div>
@@ -1503,7 +1503,7 @@ async function gsvFindLinked(lat, lng) {
     l = scored[0].lk;
   }
   p.linkOut = l ? l.heading : null; p.nextPano = l ? l.pano : null;
-  p.heading = l && angDiff(l.heading, p.center) > 90 ? l.heading : p.center;   // face the way we are going
+  p.heading = l ? l.heading : p.center;   // face along the road we set off on
   // back up about 100 m along the road so the place asked for lies ahead and the run passes it, rather than
   // starting beside it with it out of view
   if (l) {
@@ -1518,7 +1518,7 @@ async function gsvFindLinked(lat, lng) {
       const start = path[path.length - 1], toward = path[path.length - 2];
       const lk = start.links.find((k) => k.pano === toward.pano);
       start.linkOut = lk ? lk.heading : bearing(start, toward); start.nextPano = toward.pano;
-      start.heading = angDiff(start.linkOut, start.center) > 90 ? start.linkOut : start.center;
+      start.heading = start.linkOut;
       start.backedUp = Math.round(dist);
       return start;
     }
@@ -1533,6 +1533,39 @@ async function gsvNextLinked(cur, exclude) {
   p.linkOut = l ? l.heading : null; p.heading = l ? meanAngle(cur.linkOut || cur.heading, l.heading) : (cur.linkOut || cur.heading); p.nextPano = l ? l.pano : null;
   return p;
 }
+/* The road's real shape. Each panorama is a point on the road (the car drove it), so the positions of the next few
+   panoramas trace the road ahead of the one on show. Fit them with x = a z + k z^2 in that panorama's frame (x to the
+   right, z ahead, metres): `a` is the road's direction where the photo was taken, relative to the photo's facing, and
+   `k` its curvature. The game road is bent by k and the photo turned so its road lies along the runner's axis. */
+/* The road ahead of `q` as points in its frame, dead-reckoned from Google's link headings (the road graph's own
+   directions, good to a degree or two) and the distances between panoramas. Raw panorama coordinates wander by a few
+   metres, which over a 12 m hop is ten degrees of error, so they are used only for distance. */
+function roadPoints(q) {
+  const pts = []; let x = 0, z = 0, prev = q;
+  for (const p of q.ahead || []) {
+    const dir = ((prev.linkOut === null || prev.linkOut === undefined ? bearing(prev, p) : prev.linkOut) - q.heading) * Math.PI / 180, len = haversine(prev, p);
+    x += len * Math.sin(dir); z += len * Math.cos(dir); pts.push({ x, z }); prev = p;
+  }
+  return pts;
+}
+function fitRoad(q, a) {
+  const P = roadPoints(q).filter((o) => o.z > 2 && o.z < 90);
+  if (!P.length) return { a: a || 0, k: 0, n: 0 };
+  let Szz = 0, Sz3 = 0, Sz4 = 0, Sxz = 0, Sxz2 = 0;
+  for (const o of P) { const z2 = o.z * o.z; Szz += z2; Sz3 += z2 * o.z; Sz4 += z2 * z2; Sxz += o.x * o.z; Sxz2 += o.x * z2; }
+  let k;
+  if (a === undefined) {
+    const det = Szz * Sz4 - Sz3 * Sz3;
+    if (P.length < 2 || Math.abs(det) < 1e-6) { a = 0; k = Sxz2 / Sz4; } else { a = (Sxz * Sz4 - Sxz2 * Sz3) / det; k = (Szz * Sxz2 - Sz3 * Sxz) / det; }
+  } else k = (Sxz2 - a * Sz3) / Sz4;
+  return { a: clamp(a, -0.6, 0.6), k: clamp(k, -0.012, 0.012), n: P.length };
+}
+/* the next few panoramas along the planned route from `p` (data comes from the cache once route planning has run) */
+async function routeAhead(p, exclude, n) {
+  const out = []; const ex = new Set(exclude); let cur = p;
+  for (let i = 0; i < n; i++) { ex.add(cur.pano); const q = await gsvNextLinked(cur, ex).catch(() => null); if (!q) break; out.push(q); cur = q; }
+  return out;
+}
 const gsvUrl = (pano, heading, pitch) => `https://maps.googleapis.com/maps/api/streetview?size=640x640&pano=${encodeURIComponent(pano)}&heading=${((heading % 360) + 360) % 360}&pitch=${pitch}&fov=90&key=${encodeURIComponent(GKEY())}`;
 function loadTex(url) {
   return new Promise((res, rej) => { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); ld.load(url, (t) => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; res(t); }, undefined, () => rej(new Error('Street View image blocked by the browser (CORS) – ' + url.replace(/key=[^&]*/, 'key=…')))); });
@@ -1543,8 +1576,9 @@ function loadTex(url) {
    on the true ground plane and share the game road's perspective exactly, while houses and sky sit on the walls. Each
    face blends two panoramas (the one on show and the next) for the cross-fade. */
 const BOX_VERT = 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
-const BOX_FRAG = `uniform sampler2D aA, rA, lA, uA, aB, rB, lB, uB; uniform float mixT, hasA, hasB; uniform vec3 fill, centerA, centerB; varying vec3 vPos;
+const BOX_FRAG = `uniform sampler2D aA, rA, lA, uA, aB, rB, lB, uB; uniform float mixT, hasA, hasB, yawA; uniform vec3 fill, centerA, centerB; varying vec3 vPos;
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 rotY(vec3 d, float t) { return vec3(d.x * cos(t) + d.z * sin(t), d.y, -d.x * sin(t) + d.z * cos(t)); }
 vec3 look(sampler2D fa, sampler2D fr, sampler2D fl, sampler2D fu, vec3 d) {
   vec3 ad = abs(d);
   if (ad.z >= ad.x && ad.z >= ad.y) { if (d.z > 0.0) return fill; return toLinear(texture2D(fa, vec2(0.5 + 0.5 * d.x / -d.z, 0.5 + 0.5 * d.y / -d.z)).rgb); }
@@ -1553,7 +1587,7 @@ vec3 look(sampler2D fa, sampler2D fr, sampler2D fl, sampler2D fu, vec3 d) {
   return fill;
 }
 void main(){
-  vec3 a = hasA > 0.5 ? look(aA, rA, lA, uA, normalize(vPos - centerA)) : fill;
+  vec3 a = hasA > 0.5 ? look(aA, rA, lA, uA, rotY(normalize(vPos - centerA), yawA)) : fill;
   vec3 b = hasB > 0.5 ? look(aB, rB, lB, uB, normalize(vPos - centerB)) : fill;
   gl_FragColor = vec4(mix(a, b, mixT), 1.0);
 }`;
@@ -1562,7 +1596,7 @@ const ROOM_BACK = 12, ROOM_AHEAD = 45, ROOM_D = ROOM_BACK + ROOM_AHEAD;   // the
 const ROOM_CZ = ROOM_D / 2 - ROOM_BACK;   // the panorama's position inside the room, in the room's own coordinates (z toward the back wall)
 function makeBox() {
   const geo = new THREE.BoxGeometry(2 * GSV_R, ROOM_H, ROOM_D);
-  const u = { mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) }, centerA: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) }, centerB: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) } };
+  const u = { mixT: { value: 0 }, hasA: { value: 0 }, hasB: { value: 0 }, yawA: { value: 0 }, fill: { value: new THREE.Color(0x2b2b2d) }, centerA: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) }, centerB: { value: new THREE.Vector3(0, STREET_EYE - ROOM_H / 2, ROOM_CZ) } };
   for (const k of ['aA', 'rA', 'lA', 'uA', 'aB', 'rB', 'lB', 'uB']) u[k] = { value: null };
   const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: u, vertexShader: BOX_VERT, fragmentShader: BOX_FRAG, side: THREE.BackSide, depthTest: false, depthWrite: false }));
   m.renderOrder = -10; m.frustumCulled = false; m.visible = false; scene.add(m); return m;
@@ -1575,7 +1609,7 @@ function commitBox(m) {
     for (const k of ['a', 'r', 'l', 'u']) { const A = u[k + 'A'], B = u[k + 'B']; if (A.value && A.value !== B.value) A.value.dispose(); A.value = B.value; }
     u.hasA.value = 1;
   }
-  u.centerA.value.copy(u.centerB.value); u.mixT.value = 0;
+  u.centerA.value.copy(u.centerB.value); u.yawA.value = 0; u.mixT.value = 0;
 }
 /* Read the road out of the "ahead" photo: grey, low-saturation pixels in two bands below the horizon give the road's
    centre near and far; the line through them meets the horizon at the road's vanishing point. Returns the yaw
@@ -1620,8 +1654,21 @@ function gsvBegin(cur, instant) {
   street.box.visible = true;
   // the eye has walked `drift` metres past the old panorama; the new one is taken from (about) there, so it is
   // projected from the eye and the old photo keeps a centre `drift` behind for the cross-fade
-  const u = street.box.material.uniforms;
-  u.centerA.value.z = ROOM_CZ + (street.drift || 0); u.centerB.value.z = ROOM_CZ;
+  const u = street.box.material.uniforms, prev = street.gsv, cy = STREET_EYE - ROOM_H / 2;
+  if (street.linked && prev && prev.lat !== undefined && cur.lat !== undefined && !instant) {
+    // the runner keeps the direction the old road had reached; the new photo's road is fitted from there
+    const pf = prev.fit || { a: 0, k: 0 }, d = street.drift || 0;
+    const tangentWorld = prev.heading + Math.atan(pf.a + 2 * pf.k * d) * 180 / Math.PI;
+    const rel = clamp(((tangentWorld - cur.heading + 540) % 360) - 180, -30, 30);
+    cur.fit = fitRoad(cur, Math.tan(rel * Math.PI / 180));
+    // the old photo stays where it was taken (back along the link that led here), facing the way it faced, for the cross-fade
+    const back = ((prev.linkOut === null || prev.linkOut === undefined ? bearing(prev, cur) : prev.linkOut) - cur.heading) * Math.PI / 180, len = haversine(prev, cur);
+    u.centerA.value.set(-len * Math.sin(back), cy, ROOM_CZ + len * Math.cos(back)); u.yawA.value = (((prev.heading - cur.heading + 540) % 360) - 180) * Math.PI / 180;
+  } else {
+    if (!cur.fit) cur.fit = fitRoad(cur, 0);
+    u.centerA.value.set(0, cy, ROOM_CZ + (street.drift || 0)); u.yawA.value = 0;
+  }
+  u.centerB.value.set(0, cy, ROOM_CZ);
   street.drift = 0; street.swapAt = state.traveled;
   if (instant) { commitBox(street.box); street.fade = 1; } else { setBoxMix(street.box, 0); street.fade = 0.0001; }
   street.gsv = cur; street.seen.add(cur.pano); street.pending = null;
@@ -1635,6 +1682,12 @@ function gsvPrefetch() {
   (street.linked ? gsvNextLinked(from, street.seen) : gsvNext(from, street.seen)).then(async (nxt) => {
     if (!nxt) { job.dead = true; return; }
     if (!street.active || street.pending !== job) return;
+    let route = [nxt];
+    if (street.linked && nxt.lat !== undefined) {
+      route = route.concat(await routeAhead(nxt, [...street.seen, from.pano], 4));
+      nxt.ahead = route.slice(1);
+      if (!from.ahead) { from.ahead = route; from.fit = fitRoad(from, from.fit && from.fit.n ? from.fit.a : undefined); }
+    }
     await gsvLoad(street.box, nxt);
     if (street.pending === job) { job.cur = nxt; job.hop = Math.min(30, Math.max(6, haversine(from, nxt))); street.hop = job.hop; job.ready = true; }
   }).catch(() => { if (street.pending === job) street.pending = null; });
@@ -1737,16 +1790,19 @@ function streetUpdate(dt) {
     // walk forward through the photo: by the time the next photo is due, the eye has covered the real distance to
     // the next panorama, so the ground flows past and the next photo appears from where the eye has got to
     const hop = (street.pending && street.pending.hop) || street.hop || 15;
-    const frac = state.mode === 'run' ? clamp((state.traveled - (street.swapAt || street.runStart)) / GSV_SWAP, 0, 1) : 0;
+    const frac = clamp((state.traveled - (street.swapAt || street.runStart || 0)) / GSV_SWAP, 0, 1);
     street.drift = hop * frac;
-    street.box.position.set(0, ROOM_H / 2, camera.position.z + street.drift - ROOM_CZ);
-    street.box.rotation.y = street.box.userData.yaw || 0;
+    // the eye walks along the fitted road x = a z + k z^2 through the photo: `drift` metres along it the road has
+    // reached x_e and turned by phi, so the photo is turned back by phi and set so its camera point lies where it
+    // really is relative to the runner, who always runs straight along the road's local direction
+    const fit = (street.linked && street.gsv && street.gsv.fit) || { a: 0, k: 0 }, d = street.drift;
+    const phi = Math.atan(fit.a + 2 * fit.k * d), xe = fit.a * d + fit.k * d * d;
+    const right = -xe * Math.cos(phi) + d * Math.sin(phi), ahead = -xe * Math.sin(phi) - d * Math.cos(phi);
+    const rot = (street.box.userData.yaw || 0) + phi;
+    street.box.rotation.y = rot;
+    street.box.position.set(right - ROOM_CZ * Math.sin(rot), ROOM_H / 2, camera.position.z - ahead - ROOM_CZ * Math.cos(rot));
     roadFade.value = street.source ? 1 : 0;
-    // curvature from the heading change to the next panorama over the distance between them (an arc: x = k * d^2)
-    if (street.linked && street.gsv && street.pending && street.pending.ready && street.pending.cur) {
-      const dh = ((street.pending.cur.heading - street.gsv.heading + 540) % 360) - 180, hop = street.pending.hop || 20;
-      street.bendTarget = clamp(dh * Math.PI / 180 / hop, -0.012, 0.012) * 0.5;
-    }
+    street.bendTarget = fit.k;
     street.bend = lerp(street.bend || 0, street.bendTarget || 0, Math.min(1, dt * 1.5));
     roadBend.value = street.source === 'google' ? street.bend : 0;
   }

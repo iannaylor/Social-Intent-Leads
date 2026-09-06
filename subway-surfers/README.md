@@ -1,4 +1,4 @@
-# Indi’s Wipeout
+# Local Surfer
 
 A photorealistic-styled, Subway Surfers-inspired endless runner that lives in a
 single HTML file. Open `index.html` in any modern browser (Chrome, Edge, Safari,
@@ -24,7 +24,10 @@ with markings, kerbs, pavements, garden walls and hedges, lamp posts, bins and
 parked cars as lane blockers. Around it, real photos of the chosen area form the
 sky and skyline: Google Street View is used first. The Maps JavaScript API's
 Street View service gives each panorama's true facing and its links to the
-neighbouring panoramas, so the run follows the road exactly; four Street View
+neighbouring panoramas, so the run follows the road exactly. The road ahead is
+fitted to the next four panoramas (their link headings and spacing) and the game
+road bends to that curve, with the eye walking along it and the photo turned to
+match, so the road in the picture and the road under your feet stay one road; four Street View
 Static API views of each panorama (ahead, left, right, up) are mapped onto a box
 around the camera, and the picture drifts forward and cross-fades to the next
 panorama every 150 m of running. If the JavaScript API is unavailable the game
