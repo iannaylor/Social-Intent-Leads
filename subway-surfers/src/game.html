@@ -8,7 +8,7 @@
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
 // pasted here for hosted builds, or entered on the start card / passed as ?mly=TOKEN.
-window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa58a2207fd4e2323', googleKey: 'AIzaSyCWdznf57gsN7Ej_-rdgvCMkrQbbuvuYKo' };
+window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa58a2207fd4e2323', googleKey: 'AIzaSyCWdznf57gsN7Ej_-rdgvCMkrQbbuvuYKo', supabaseUrl: 'https://frqvanekrsmbgpxoveio.supabase.co', supabaseKey: 'sb_publishable_9iy4QA80OSZ9GF88svUg4g_PCfv4BlL' };
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -64,6 +64,32 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   button:active{transform:translateY(3px);box-shadow:0 1px 0 #6f6a61}
   button:focus-visible{outline:3px solid var(--sodium);outline-offset:3px}
   #dead .cause{font-family:var(--display);font-size:16px;letter-spacing:.2em;color:var(--danger);margin:-2px 0 14px}
+  #dead .rank{font-family:var(--display);font-size:17px;letter-spacing:.16em;color:var(--gold);margin:-8px 0 16px;min-height:1.2em;line-height:1.35;text-wrap:balance}
+  #dead .rank.dim{color:var(--ink-dim)}
+  [hidden]{display:none!important}
+  #boards h1{font-size:44px}
+  .namerow{display:flex;gap:8px;align-items:center;justify-content:center;margin:-6px 0 16px}
+  .namerow input{width:150px;font-family:var(--mono);font-size:17px;color:var(--ink);background:#15181b;border:1px solid var(--plate-edge);padding:7px 9px;text-transform:none}
+  .namerow input:focus{outline:2px solid var(--sodium);outline-offset:1px}
+  .namerow button{font-size:18px;padding:9px 16px 7px;letter-spacing:.12em;box-shadow:0 2px 0 #6f6a61}
+  .namerow .lbl{font-family:var(--display);font-size:15px;letter-spacing:.16em;color:var(--ink-dim)}
+  .links{margin-top:12px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .links button{background:transparent;color:#d6d0c4;box-shadow:none;font-size:14px;letter-spacing:.14em;padding:7px 12px 5px;border:1px solid var(--plate-edge)}
+  .links button:hover{background:#1b1e22;color:var(--ink)}
+  .tabs{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin:0 0 10px}
+  .tabs button{font-size:15px;letter-spacing:.12em;padding:7px 11px 5px;background:#1b1e22;color:#d6d0c4;box-shadow:none;border:1px solid var(--plate-edge);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tabs button.cur{background:var(--ink);color:#111}
+  .tabs.period button{font-size:13px;padding:5px 10px 3px}
+  #boardList{list-style:none;margin:0 0 14px;padding:0;text-align:left;font-size:15px;max-height:44vh;overflow-y:auto;border-top:1px solid var(--plate-edge)}
+  #boardList li{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:baseline;padding:6px 4px 4px;border-bottom:1px solid #1d2024;font-variant-numeric:tabular-nums}
+  #boardList li.me{background:#1f1a12;color:var(--gold)}
+  #boardList li .n{font-family:var(--display);font-size:16px;letter-spacing:.1em;color:var(--ink-dim)}
+  #boardList li .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #boardList li .who small{color:var(--ink-dim);font-size:12px;margin-left:8px}
+  #boardList li .s{font-weight:600}
+  #boardList li.empty{display:block;text-align:center;color:var(--ink-dim);padding:18px 0}
+  #boardYou{font-size:14px;color:var(--ink-dim);margin:0 0 12px}
+  #boardYou b{color:var(--ink);font-weight:600}
   #loading{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;font-family:var(--display);font-size:18px;letter-spacing:.3em;color:var(--ink-dim);background:var(--ground);transition:opacity .5s}
   #loading.off{opacity:0;pointer-events:none}
   #loading .bar{width:180px;height:3px;background:#1d2024;overflow:hidden}
@@ -129,6 +155,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
       <li><b>∩ MAGNET</b>The red horseshoe: coins come to you.</li>
     </ul>
     <button class="ghost" id="btnTunnel" type="button">OR RUN THE TUNNEL INSTEAD</button>
+    <div class="links"><button type="button" id="btnBoards0">LEADERBOARDS</button></div>
   </div>
 </div>
 <div id="street"></div>
@@ -143,8 +170,24 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
       <div class="gold" id="dCoins">0<span>COINS</span></div>
       <div id="dBest">0<span>BEST</span></div>
     </div>
+    <div class="rank" id="rank"></div>
+    <div class="namerow" id="nameRow" hidden><span class="lbl">YOUR NAME</span><input type="text" id="nameIn" maxlength="14" placeholder="Runner" autocomplete="nickname" enterkeyhint="done"><button type="button" id="btnName">SAVE</button></div>
     <button id="btnAgain">RUN AGAIN</button>
-    <div style="margin-top:12px"><button id="btnMenu" class="small" style="font-size:14px;padding:7px 14px 5px;letter-spacing:.14em;background:#2a2d31;color:var(--ink);box-shadow:0 2px 0 #060708">MENU · STREET MODE</button></div>
+    <div class="links"><button type="button" id="btnBoards">LEADERBOARDS</button><button type="button" id="btnMenu">MENU · STREET MODE</button></div>
+  </div>
+</div>
+
+<div id="boards" class="overlay">
+  <div class="card">
+    <h1>LEADERBOARDS</h1>
+    <div class="sub" id="boardSub">BEST RUN PER PLAYER</div>
+    <div class="tabs" id="boardTabs"></div>
+    <div class="tabs period"><button type="button" data-period="all" class="cur">ALL TIME</button><button type="button" data-period="week">THIS WEEK</button></div>
+    <ul id="boardList"><li class="empty">LOADING…</li></ul>
+    <div id="boardYou"></div>
+    <div class="namerow" id="boardNameRow" hidden><span class="lbl">NAME</span><input type="text" id="boardNameIn" maxlength="14" placeholder="Runner" autocomplete="nickname" enterkeyhint="done"><button type="button" id="btnBoardName">SAVE</button></div>
+    <button id="btnBoardsClose">CLOSE</button>
+    <div class="links"><button type="button" id="btnRename">CHANGE NAME</button><button type="button" id="btnForget">REMOVE MY SCORES</button></div>
   </div>
 </div>
 
@@ -1635,6 +1678,7 @@ async function startStreet(place) {
   street.place = place; street.panos = []; street.panoIdx = -1; street.gsv = null; street.source = ''; street.seen = new Set(); street.pending = null; street.bend = 0; street.bendTarget = 0;
   street.sky.visible = false; street.skyB.visible = false; street.box.visible = false;
   street.active = true;
+  resolvePlace(place.lat, place.lon).catch(() => null);
   for (const sg of segments) styleSegment(sg, sg.styleIndex);
   applyStreetLighting(true);
   let gerr = '';
@@ -1939,9 +1983,143 @@ function die(cause) {
   $('cause').textContent = cause;
   if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
   $('dScore').firstChild.textContent = String(Math.floor(state.score)); $('dCoins').firstChild.textContent = String(state.coins); $('dBest').firstChild.textContent = String(state.best);
-  updateHUD();
+  updateHUD(); lbRecord();
   setTimeout(() => { if (state.mode === 'dead') $('dead').classList.add('on'); }, 900);
 }
+
+/* ============================================================
+   Leaderboards (Supabase). World / country / county / town / area, best run per player.
+   The client only ever calls RPC functions; tables are locked behind RLS (see supabase/schema.sql).
+   ============================================================ */
+const SB = () => ({ url: (window.INDI_CONFIG && window.INDI_CONFIG.supabaseUrl) || '', key: (window.INDI_CONFIG && window.INDI_CONFIG.supabaseKey) || '' });
+const lb = { place: null, placeKey: '', name: '', device: '', last: null, pending: null, scope: 'world', period: 'all', busy: false };
+try { lb.name = (localStorage.getItem('indi.name') || '').slice(0, 14); lb.device = localStorage.getItem('indi.device') || ''; } catch (e) { /* ignore */ }
+if (!lb.device) {
+  const b = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.floor(Math.random() * 256); });
+  lb.device = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  try { localStorage.setItem('indi.device', lb.device); } catch (e) { /* ignore */ }
+}
+async function sbRpc(fn, params) {
+  const { url, key } = SB(); if (!url || !key) throw new Error('no leaderboard');
+  const r = await fetch(url + '/rest/v1/rpc/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: key, Authorization: 'Bearer ' + key }, body: JSON.stringify(params || {}) });
+  const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) { j = null; }
+  if (!r.ok) throw new Error((j && (j.message || j.hint || j.error)) || ('HTTP ' + r.status));
+  return j;
+}
+function geohash5(lat, lon) {
+  const B = '0123456789bcdefghjkmnpqrstuvwxyz'; let la = [-90, 90], lo = [-180, 180], out = '', bit = 0, ch = 0, even = true;
+  while (out.length < 5) {
+    if (even) { const m = (lo[0] + lo[1]) / 2; if (lon >= m) { ch = ch * 2 + 1; lo[0] = m; } else { ch *= 2; lo[1] = m; } }
+    else { const m = (la[0] + la[1]) / 2; if (lat >= m) { ch = ch * 2 + 1; la[0] = m; } else { ch *= 2; la[1] = m; } }
+    even = !even; if (++bit === 5) { out += B[ch]; bit = 0; ch = 0; }
+  }
+  return out;
+}
+const tidyPlace = (s) => (s || '').replace(/,?\s*unparished area/i, '').replace(/\s+(CP|BC|TC|PC)$/i, '').trim() || null;
+/* Which country / county / town / area a point belongs to. UK: postcodes.io; elsewhere: Google's geocoder. */
+async function resolvePlace(lat, lon) {
+  const key = lat.toFixed(3) + ',' + lon.toFixed(3); if (lb.placeKey === key && lb.place) return lb.place;
+  let p = null;
+  try {
+    const r = await fetch('https://api.postcodes.io/postcodes?lon=' + lon + '&lat=' + lat + '&limit=1&radius=1500'); const j = await r.json();
+    const x = j && j.result && j.result[0];
+    if (x) p = { country_code: 'GB', country: 'United Kingdom', county: tidyPlace(x.admin_county || x.region || x.admin_district), town: tidyPlace(x.parish) || tidyPlace(x.admin_district), area: x.outcode || null, nation: x.country };
+  } catch (e) { console.warn('[lb] postcodes.io failed:', e.message); }
+  if (!p && window.google && google.maps && google.maps.Geocoder) {
+    try {
+      const res = await new google.maps.Geocoder().geocode({ location: { lat, lng: lon } });
+      const comps = (res.results || []).flatMap((rr) => rr.address_components || []); const find = (...types) => { for (const t of types) { const c = comps.find((c) => c.types.includes(t)); if (c) return c; } return null; };
+      const cc = find('country'), county = find('administrative_area_level_2', 'administrative_area_level_1'), town = find('postal_town', 'locality', 'administrative_area_level_3'), area = find('neighborhood', 'sublocality', 'sublocality_level_1') || find('postal_code');
+      if (cc) p = { country_code: cc.short_name, country: cc.long_name, county: county && county.long_name, town: town && town.long_name, area: area && (area.types.includes('postal_code') ? area.long_name.split(/[\s-]/)[0] : area.long_name) };
+    } catch (e) { console.warn('[lb] geocoder failed:', e.message); }
+  }
+  if (p) { p.geohash5 = geohash5(lat, lon); lb.place = p; lb.placeKey = key; }
+  return p;
+}
+const ordinal = (n) => { const s = ['TH', 'ST', 'ND', 'RD'], v = n % 100; return n.toLocaleString('en-GB') + (s[(v - 20) % 10] || s[v] || s[0]); };
+function rankLine(res) {
+  const parts = [], P = lb.last && lb.last.place;
+  const add = (r, where) => { if (r && r.rank) parts.push(ordinal(r.rank) + ' IN ' + where.toUpperCase()); };
+  if (P) { if (P.town) add(res.town, P.town); else if (P.area) add(res.area, P.area); if (P.county && P.county !== P.town) add(res.county, P.county); }
+  add(res.world, 'the world');
+  if (res.week && res.week.rank && res.week.rank <= 10 && res.world && res.world.rank > 10) parts.push(ordinal(res.week.rank) + ' THIS WEEK');
+  return parts.slice(0, 4).join(' · ');
+}
+function setRank(text, dim) { const r = $('rank'); r.textContent = text; r.classList.toggle('dim', !!dim); }
+function saveName(n) { n = (n || '').replace(/[^A-Za-z0-9 _.\-]/g, '').trim().slice(0, 14); if (n.length < 2) return false; lb.name = n; try { localStorage.setItem('indi.name', n); } catch (e) { /* ignore */ } return true; }
+/* called from die(): submit the run, or ask for a name first */
+function lbRecord() {
+  const run = { mode: street.active && street.source ? 'street' : 'tunnel', score: Math.floor(state.score), coins: state.coins, distance: Math.round(state.traveled), duration: Math.round(state.time * 10) / 10, place: street.active && street.source ? lb.place : null };
+  lb.last = run; setRank('');
+  if (!SB().url || run.score <= 0 || run.duration < 1) { $('nameRow').hidden = true; return; }
+  if (!lb.name) { $('nameRow').hidden = false; $('nameIn').value = ''; setRank('ENTER A NAME TO JOIN THE LEADERBOARD', true); return; }
+  $('nameRow').hidden = true; lbSubmit(run);
+}
+async function lbSubmit(run) {
+  if (lb.busy) return; lb.busy = true; setRank('CHECKING THE BOARDS…', true);
+  const P = run.place || {};
+  try {
+    const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
+    run.ranks = res; setRank(rankLine(res) || 'ON THE BOARD');
+  } catch (e) { console.warn('[lb] submit failed:', e.message); setRank(/implausible|too fast|daily/.test(e.message) ? 'RUN NOT COUNTED' : 'LEADERBOARD OFFLINE', true); }
+  lb.busy = false;
+}
+$('btnName').addEventListener('click', () => { if (!saveName($('nameIn').value)) { $('nameIn').focus(); return; } $('nameRow').hidden = true; if (lb.last) lbSubmit(lb.last); });
+$('nameIn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); $('btnName').click(); } });
+/* boards panel */
+function boardScopes() {
+  const P = lb.place, out = [{ scope: 'world', key: null, label: 'WORLD' }];
+  if (P) {
+    if (P.country_code) out.push({ scope: 'country', key: P.country_code, label: P.country_code === 'GB' ? 'UK' : (P.country || P.country_code).toUpperCase() });
+    if (P.county) out.push({ scope: 'county', key: P.county, label: P.county.toUpperCase() });
+    if (P.town && P.town !== P.county) out.push({ scope: 'town', key: P.town, label: P.town.toUpperCase() });
+    if (P.area) out.push({ scope: 'area', key: P.area, label: P.area.toUpperCase() });
+  }
+  return out;
+}
+let boardsFrom = 'start';
+function openBoards(scope) {
+  if (!$('boards').classList.contains('on')) boardsFrom = $('dead').classList.contains('on') ? 'dead' : 'start';
+  const scopes = boardScopes(); if (scope && scopes.some((s) => s.scope === scope)) lb.scope = scope; else if (!scopes.some((s) => s.scope === lb.scope)) lb.scope = scopes[Math.min(scopes.length - 1, 3)].scope;
+  const tabs = $('boardTabs'); tabs.innerHTML = '';
+  for (const s of scopes) { const b = document.createElement('button'); b.type = 'button'; b.textContent = s.label; b.className = s.scope === lb.scope ? 'cur' : ''; b.addEventListener('click', () => { lb.scope = s.scope; openBoards(s.scope); }); tabs.appendChild(b); }
+  for (const b of document.querySelectorAll('#boards .period button')) b.classList.toggle('cur', b.dataset.period === lb.period);
+  $('boardYou').innerHTML = lb.name ? 'YOU ARE <b>' + lb.name.replace(/[<>&]/g, '') + '</b>' : 'NO NAME YET · YOU JOIN THE BOARD AFTER YOUR FIRST RUN';
+  $('boardNameRow').hidden = true;
+  $('start').classList.remove('on'); $('dead').classList.remove('on'); $('boards').classList.add('on');
+  loadBoard();
+}
+async function loadBoard() {
+  const list = $('boardList'), sc = boardScopes().find((s) => s.scope === lb.scope) || { scope: 'world', key: null }; const want = lb.scope + '|' + lb.period;
+  list.innerHTML = '<li class="empty">LOADING…</li>'; lb.want = want;
+  try {
+    const rows = await sbRpc('top_runs', { p_scope: sc.scope, p_key: sc.key, p_period: lb.period, p_limit: 25 });
+    if (lb.want !== want) return;
+    if (!rows || !rows.length) { list.innerHTML = '<li class="empty">NO RUNS HERE YET · BE THE FIRST</li>'; return; }
+    list.innerHTML = '';
+    for (const r of rows) {
+      const li = document.createElement('li'); if (lb.name && r.name === lb.name) li.className = 'me';
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = String(r.rank);
+      const who = document.createElement('span'); who.className = 'who'; who.textContent = r.name; if (r.town && (sc.scope === 'world' || sc.scope === 'country' || sc.scope === 'county')) { const sm = document.createElement('small'); sm.textContent = r.town; who.appendChild(sm); }
+      const s = document.createElement('span'); s.className = 's'; s.textContent = Number(r.score).toLocaleString('en-GB');
+      li.append(n, who, s); list.appendChild(li);
+    }
+  } catch (e) { if (lb.want === want) list.innerHTML = '<li class="empty">' + (SB().url ? 'LEADERBOARD OFFLINE' : 'NO LEADERBOARD CONFIGURED') + '</li>'; }
+}
+function closeBoards() { $('boards').classList.remove('on'); $(boardsFrom === 'dead' ? 'dead' : 'start').classList.add('on'); }
+$('btnBoards').addEventListener('click', () => openBoards());
+$('btnBoards0').addEventListener('click', () => openBoards());
+$('btnBoardsClose').addEventListener('click', closeBoards);
+for (const b of document.querySelectorAll('#boards .period button')) b.addEventListener('click', () => { lb.period = b.dataset.period; openBoards(lb.scope); });
+$('btnRename').addEventListener('click', () => { $('boardNameRow').hidden = false; $('boardNameIn').value = lb.name; $('boardNameIn').focus(); });
+$('btnBoardName').addEventListener('click', () => { if (!saveName($('boardNameIn').value)) { $('boardNameIn').focus(); return; } $('boardNameRow').hidden = true; $('boardYou').innerHTML = 'YOU ARE <b>' + lb.name.replace(/[<>&]/g, '') + '</b> · SHOWS ON YOUR NEXT RUN'; });
+$('boardNameIn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); $('btnBoardName').click(); } });
+$('btnForget').addEventListener('click', async () => {
+  if (!window.confirm('Remove every score recorded from this device?')) return;
+  try { await sbRpc('remove_my_runs', { p_device: lb.device }); lb.name = ''; try { localStorage.removeItem('indi.name'); } catch (e) { /* ignore */ } $('boardYou').textContent = 'YOUR SCORES HAVE BEEN REMOVED'; loadBoard(); }
+  catch (e) { $('boardYou').textContent = 'COULD NOT REACH THE LEADERBOARD'; }
+});
+window.indiBoards = lb;
 
 /* ---- input */
 function doLeft() { if (state.mode !== 'run' || player.stumble > 0.25) return; if (player.lane > 0) { player.prevLane = player.lane; player.lane--; sfxSwish(); } }
@@ -1953,6 +2131,7 @@ window.addEventListener('keydown', (e) => {
   if (KEYS.has(e.key) && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) e.preventDefault();
   if (e.repeat) return; const k = e.key; if (k === 'm' || k === 'M') { audioInit(); musicToggle(); return; }
   if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+  if ($('boards').classList.contains('on')) { if (k === 'Escape') closeBoards(); return; }
   if (state.mode === 'idle' && (k === ' ' || k === 'Enter')) { e.preventDefault(); startRun(); return; }
   if (state.mode === 'dead' && (k === ' ' || k === 'Enter') && $('dead').classList.contains('on')) { e.preventDefault(); startRun(); return; }
   if (k === 'v' || k === 'V') { setView(view === 'fp' ? 'tp' : 'fp'); return; }
@@ -1967,7 +2146,7 @@ window.addEventListener('pointerup', (e) => {
   if (!touchStart) return;
   const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y; touchStart = null;
   const ax = Math.abs(dx), ay = Math.abs(dy);
-  if (Math.max(ax, ay) < 24) { if (state.mode === 'idle') startRun(); return; }
+  if (Math.max(ax, ay) < 24) { if (state.mode === 'idle' && !$('boards').classList.contains('on')) startRun(); return; }
   if (ax > ay) { if (dx < 0) doLeft(); else doRight(); } else { if (dy < 0) doJump(); else doRoll(); }
 });
 $('btnStart').addEventListener('click', () => startRun('street'));

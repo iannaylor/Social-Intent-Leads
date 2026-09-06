@@ -1,5 +1,9 @@
 # Regional leaderboards: plan
 
+> Status: phases 1 and 2 are built. `supabase/schema.sql` is the backend;
+> the client lives in `src/game.html` under "Leaderboards". Weekly boards
+> and remove-my-scores from phase 3 are in too. See README, "Leaderboards".
+
 Goal: after a run, a player sees where they stand in the world, their country,
 their county, their town and their own area, and can browse each board. Boards
 are keyed to where the run **started** (the postcode or location the player

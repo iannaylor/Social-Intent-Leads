@@ -44,6 +44,35 @@ Street mode has its own hazards and rewards: real parked cars (a CC BY Ferrari
 WINGS (seven seconds of a high, floaty jump that clears the cars, and double
 points) and a red horseshoe MAGNET (ten seconds of coins pulled to you).
 
+## Leaderboards
+
+After every run the wipeout card shows where the score lands: in your town (or
+area), your county and the world, with a "this week" note when it is a top-ten
+weekly score. LEADERBOARDS on the start and wipeout cards opens the boards:
+WORLD, UK (or your country), county, town and postcode area, all time or this
+week, best run per player. Street runs count on every board of the place you
+started from; tunnel runs count worldwide only.
+
+The first wipeout asks for a name (2 to 14 characters). Runs are tied to a
+random key kept in the browser, so there is no sign-up. CHANGE NAME and REMOVE
+MY SCORES live in the boards panel.
+
+The backend is a Supabase project; the client talks only to the SQL functions
+in `supabase/schema.sql` (tables are behind row-level security with no direct
+access). To set it up, or move it to your own project:
+
+1. Create a Supabase project, open SQL Editor, paste `supabase/schema.sql`,
+   Run. It is safe to run again after edits.
+2. Put the project URL and the publishable (anon) key in the config block at
+   the top of `src/game.html` (`supabaseUrl`, `supabaseKey`) and rebuild. The
+   key is public by design.
+3. Places come from postcodes.io for UK runs and Google's geocoder elsewhere,
+   both looked up once at street start.
+
+`submit_run` rejects runs that are faster than the game allows, score more than
+the distance and coins could earn, or arrive more than once every six seconds,
+and caps a device at 300 runs a day.
+
 ### Hosting on GitHub Pages
 
 `.github/workflows/pages.yml` publishes this folder to GitHub Pages on every
