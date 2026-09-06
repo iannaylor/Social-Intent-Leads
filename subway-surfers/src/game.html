@@ -33,7 +33,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #best.on{opacity:1}
   #view{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));min-width:0;padding:6px 12px 4px;opacity:0;transition:opacity .4s;cursor:pointer}
   #view.on{opacity:1}
-  #mute{position:fixed;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:44px;height:44px;padding:0;font-size:22px;letter-spacing:0;background:rgba(10,12,14,.75);color:var(--ink);border:1px solid var(--plate-edge);box-shadow:none;border-radius:6px}
+  #mute{position:fixed;top:calc(max(14px,env(safe-area-inset-top)) + 70px);right:max(14px,env(safe-area-inset-right));width:44px;height:44px;padding:0;font-size:22px;letter-spacing:0;background:rgba(10,12,14,.75);color:var(--ink);border:1px solid var(--plate-edge);box-shadow:none;border-radius:6px}
   #mute.off{color:var(--ink-dim);text-decoration:line-through}
   #lanes{position:fixed;left:50%;transform:translateX(-50%);bottom:max(30px,calc(env(safe-area-inset-bottom) + 12px));display:flex;gap:10px;opacity:0;transition:opacity .4s;pointer-events:none}
   #lanes.on{opacity:.85}
@@ -119,7 +119,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-width:80vw;text-align:center;color:var(--ink);font-size:14px;line-height:1.5;display:none}
   #build{position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:10px;letter-spacing:.15em;color:var(--ink-dim);opacity:.45;pointer-events:none}
   #q{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));font-family:var(--display);font-size:12px;letter-spacing:.2em;color:var(--ink-dim);opacity:.6;pointer-events:none}
-  @media (max-width:520px){h1{font-size:44px}.plate{min-width:96px;padding:6px 10px 4px}.plate .val{font-size:20px}.rules{grid-template-columns:1fr}}
+  @media (max-width:520px){h1{font-size:44px}.plate{min-width:96px;padding:6px 10px 4px}.plate .val{font-size:20px}.rules{grid-template-columns:1fr}#mute{top:calc(max(14px,env(safe-area-inset-top)) + 58px)}#hint{bottom:max(64px,calc(env(safe-area-inset-bottom) + 50px));font-size:14px;padding:0 12px}}
   @media (prefers-reduced-motion:reduce){.overlay,.plate,#hud,#hint{transition:none}}
 </style>
 </head>
@@ -135,6 +135,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 <div id="lanes"><i></i><i></i><i></i></div>
 <div id="turbo"><span>WINGS · SUPER JUMP · DOUBLE POINTS</span><i></i></div>
 <div id="hint">SWIPE OR ARROW KEYS · SPACE JUMP · DOWN ROLL</div>
+<script>if (window.matchMedia && matchMedia('(pointer: coarse)').matches) document.getElementById('hint').textContent = 'SWIPE LEFT OR RIGHT · SWIPE UP TO JUMP · SWIPE DOWN TO ROLL';</script>
 <div id="q"></div>
 <div id="build"></div>
 <div id="view" class="plate"><div class="lbl">VIEW · V</div><div class="val" id="viewv" style="font-size:16px">FIRST PERSON</div></div>
