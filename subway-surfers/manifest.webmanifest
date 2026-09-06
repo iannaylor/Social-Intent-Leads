@@ -1,0 +1,14 @@
+{
+  "name": "Local Surfer",
+  "short_name": "Local Surfer",
+  "description": "Run down your own street, wrapped in real photos of it. Beat your neighbours on the local leaderboard.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
