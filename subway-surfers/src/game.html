@@ -4,7 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Local Surfer</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EI%3C/text%3E%3C/svg%3E">
+<meta name="description" content="Run down your own street, wrapped in real photos of it. Beat your neighbours on the local leaderboard.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Local Surfer">
+<meta property="og:description" content="Run down your own street, wrapped in real photos of it. Can you beat the best run in your town?">
+<meta property="og:url" content="https://localsurfer.app/">
+<meta property="og:image" content="https://localsurfer.app/share.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Local Surfer">
+<meta name="twitter:description" content="Run down your own street, wrapped in real photos of it. Can you beat the best run in your town?">
+<meta name="twitter:image" content="https://localsurfer.app/share.jpg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EL%3C/text%3E%3C/svg%3E">
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
 // pasted here for hosted builds, or entered on the start card / passed as ?mly=TOKEN.
@@ -78,6 +90,12 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   .links{margin-top:12px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
   .links button{background:transparent;color:#d6d0c4;box-shadow:none;font-size:14px;letter-spacing:.14em;padding:7px 12px 5px;border:1px solid var(--plate-edge)}
   .links button:hover{background:#1b1e22;color:var(--ink)}
+  .links button.share{border-color:var(--sodium);color:#ffb060;font-size:16px;padding:9px 16px 7px}
+  .links button.share:hover{background:#2a1a0e}
+  .sharerow{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}
+  .sharerow a,.sharerow button{font-family:var(--display);font-size:13px;letter-spacing:.14em;color:#d6d0c4;text-decoration:none;background:#1b1e22;border:1px solid var(--plate-edge);padding:6px 10px 4px;box-shadow:none;cursor:pointer}
+  .sharerow a:hover,.sharerow button:hover{background:#2a2d31;color:var(--ink)}
+  .sharerow .msg{width:100%;font-size:13px;color:var(--ink-dim);margin-top:4px;font-family:var(--mono)}
   .tabs{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin:0 0 10px}
   .tabs button{font-size:15px;letter-spacing:.12em;padding:7px 11px 5px;background:#1b1e22;color:#d6d0c4;box-shadow:none;border:1px solid var(--plate-edge);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tabs button.cur{background:var(--ink);color:#111}
@@ -92,9 +110,15 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #boardList li.empty{display:block;text-align:center;color:var(--ink-dim);padding:18px 0}
   #boardYou{font-size:14px;color:var(--ink-dim);margin:0 0 12px}
   #boardYou b{color:var(--ink);font-weight:600}
-  #loading{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;font-family:var(--display);font-size:18px;letter-spacing:.3em;color:var(--ink-dim);background:var(--ground);transition:opacity .5s}
+  /* the artwork is the splash and the backdrop to the start card: landscape on wide screens, portrait on phones */
+  #loading{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:flex-end;padding-bottom:max(9vh,calc(env(safe-area-inset-bottom) + 40px));box-sizing:border-box;font-family:var(--display);font-size:18px;letter-spacing:.3em;color:var(--ink);text-shadow:0 2px 8px #000,0 0 18px #000;background:#0b0c0e url(splash-land.jpg) center/cover no-repeat;transition:opacity .5s}
+  #start{background:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-land.jpg) center/cover no-repeat}
+  #start .card{background:linear-gradient(180deg,rgba(23,25,28,.9),rgba(11,12,14,.94));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  @media (orientation:portrait){#loading{background-image:url(splash-port.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-port.jpg)}}
+  @media (orientation:portrait) and (max-width:700px){#loading{background-image:url(splash-port-s.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-port-s.jpg)}}
+  @media (orientation:landscape) and (max-width:900px){#loading{background-image:url(splash-land-s.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-land-s.jpg)}}
   #loading.off{opacity:0;pointer-events:none}
-  #loading .bar{width:180px;height:3px;background:#1d2024;overflow:hidden}
+  #loading .bar{width:180px;height:4px;background:rgba(0,0,0,.6);overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
   #loading .bar i{display:block;height:100%;width:0;background:var(--sodium);transition:width .3s}
   #street{position:fixed;inset:0;display:none;background:#0b0c0e}
   #street.on{display:block}
@@ -166,7 +190,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 
 <div id="dead" class="overlay">
   <div class="card">
-    <h1>WIPEOUT</h1>
+    <h1>LOCAL SURFER</h1>
     <div class="cause" id="cause">HIT A TRAIN</div>
     <div class="stat">
       <div id="dScore">0<span>SCORE</span></div>
@@ -176,6 +200,8 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
     <div class="rank" id="rank"></div>
     <div class="namerow" id="nameRow" hidden><span class="lbl">YOUR NAME</span><input type="text" id="nameIn" maxlength="14" placeholder="Runner" autocomplete="nickname" enterkeyhint="done"><button type="button" id="btnName">SAVE</button></div>
     <button id="btnAgain">RUN AGAIN</button>
+    <div class="links"><button type="button" id="btnShare" class="share">SHARE · CAN YOU BEAT ME?</button></div>
+    <div class="sharerow" id="shareRow" hidden></div>
     <div class="links"><button type="button" id="btnBoards">LEADERBOARDS</button><button type="button" id="btnMenu">MENU · STREET MODE</button></div>
   </div>
 </div>
@@ -2144,11 +2170,86 @@ async function lbSubmit(run) {
   try {
     const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
     run.ranks = res; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
+    if (res.player) lb.playerId = res.player; if (res.best) lb.best = res.best;
+    if (!res.v) { const d = document.createElement('div'); d.textContent = 'BOARDS NEED THE SCHEMA UPDATE'; d.style.color = '#e0705f'; $('rank').appendChild(d); }
   } catch (e) { console.warn('[lb] submit failed:', e.message); setRank(/implausible|too fast|daily/.test(e.message) ? 'RUN NOT COUNTED' : 'LEADERBOARD OFFLINE', true); }
   lb.busy = false;
 }
 $('btnName').addEventListener('click', () => { if (!saveName($('nameIn').value)) { $('nameIn').focus(); return; } $('nameRow').hidden = true; if (lb.last) lbSubmit(lb.last); });
 $('nameIn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); $('btnName').click(); } });
+/* ---- share: "I'm 2nd in Keyworth, can you beat me?" with a card image and a link that starts on the same street */
+const ordinalLower = (n) => ordinal(n).toLowerCase();
+function shareInfo() {
+  const run = lb.last || {}, P = run.place || lb.place || null;
+  const useBest = lb.best && lb.best.score >= (run.score || 0);
+  const ranks = useBest ? lb.best : (run.ranks || null), score = useBest ? lb.best.score : (run.score || state.best || 0);
+  let where = null, r = null;
+  if (ranks) {
+    if (P && P.town && ranks.town && ranks.town.rank) { where = P.town; r = ranks.town; }
+    else if (P && P.area && ranks.area && ranks.area.rank) { where = P.area; r = ranks.area; }
+    else if (P && P.county && ranks.county && ranks.county.rank) { where = P.county; r = ranks.county; }
+    else if (ranks.world && ranks.world.rank) { where = 'the world'; r = ranks.world; }
+  }
+  const url = new URL(location.origin + location.pathname);
+  if (streetPlace && streetPlace.query) url.searchParams.set('pc', streetPlace.query);
+  else if (street.place && street.place.lat !== undefined) { url.searchParams.set('at', street.place.lat.toFixed(5) + ',' + street.place.lon.toFixed(5)); if (P && P.town) url.searchParams.set('name', P.town); }
+  if (lb.name) url.searchParams.set('by', lb.name);
+  const rankText = r ? ordinalLower(r.rank) + ' in ' + where : null;
+  const text = (rankText ? "I'm " + rankText + ' on Local Surfer with ' + score.toLocaleString('en-GB') + ' points.' : 'I scored ' + score.toLocaleString('en-GB') + ' on Local Surfer.') + ' Can you beat me' + (P && P.town ? ' on the same street' : ' on your own street') + '?';
+  return { text, url: url.toString(), score, rankText: rankText ? rankText.toUpperCase() : null, where, rank: r };
+}
+async function shareImage(info) {
+  const W = 1080, H = 1080, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  try { await Promise.all([document.fonts.load('80px "Bebas Neue"'), document.fonts.load('600 40px "IBM Plex Mono"')]); } catch (e) { /* fall back */ }
+  const D = '"Bebas Neue","Oswald",Impact,"Arial Narrow",sans-serif', M = '"IBM Plex Mono",Menlo,Consolas,monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  // the poster artwork (logo at the top) with a dark plate rising over its lower half for the numbers
+  const bg = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = 'splash-port.jpg'; });
+  if (bg) {
+    const sc = W / bg.width; g.drawImage(bg, 0, 0, bg.width * sc, bg.height * sc);
+    const gr = g.createLinearGradient(0, H * 0.4, 0, H); gr.addColorStop(0, 'rgba(11,12,14,0)'); gr.addColorStop(0.28, 'rgba(11,12,14,.88)'); gr.addColorStop(1, 'rgba(11,12,14,.97)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  } else {
+    const grad = g.createLinearGradient(0, 0, 0, H); grad.addColorStop(0, '#17191c'); grad.addColorStop(1, '#0b0c0e'); g.fillStyle = grad; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#f2eee6'; g.font = '110px ' + D; g.fillText('LOCAL SURFER', W / 2, 250);
+    g.fillStyle = '#a9a49a'; g.font = '34px ' + D; g.fillText('Y O U R   S T R E E T   ·   Y O U R   R U N', W / 2, 330);
+  }
+  for (let x = 0; x < W; x += 60) { g.fillStyle = '#e8792b'; g.fillRect(x, H - 14, 48, 14); g.fillStyle = '#1a1a1a'; g.fillRect(x + 48, H - 14, 12, 14); }
+  if (info.rank) {
+    g.fillStyle = '#f2eee6'; g.font = '230px ' + D; g.fillText(ordinal(info.rank.rank), W / 2, 700);
+    g.fillStyle = '#e0a83a'; g.font = '60px ' + D; g.fillText('IN ' + info.where.toUpperCase(), W / 2, 830);
+  } else { g.fillStyle = '#f2eee6'; g.font = '120px ' + D; g.fillText('MY RUN', W / 2, 720); }
+  g.fillStyle = '#f2eee6'; g.font = '600 60px ' + M; g.fillText(info.score.toLocaleString('en-GB') + ' PTS', W / 2, 915);
+  g.fillStyle = '#ffb060'; g.font = '60px ' + D; g.fillText('CAN YOU BEAT ME?', W / 2, 985);
+  g.fillStyle = '#a9a49a'; g.font = '30px ' + D; g.fillText('L O C A L S U R F E R . A P P', W / 2, 1042);
+  return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.86));
+}
+async function doShare() {
+  const info = shareInfo(); const full = info.text + ' ' + info.url;
+  let file = null;
+  try { const blob = await shareImage(info); if (blob) file = new File([blob], 'local-surfer.jpg', { type: 'image/jpeg' }); } catch (e) { file = null; }
+  if (navigator.share) {
+    try {
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url, files: [file] });
+      else await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url });
+      return;
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  // no system share sheet (most desktops): links to the networks, copy, and the image
+  const row = $('shareRow'); row.innerHTML = ''; row.hidden = false;
+  const enc = encodeURIComponent, add = (label, href) => { const a = document.createElement('a'); a.textContent = label; a.href = href; a.target = '_blank'; a.rel = 'noopener'; row.appendChild(a); };
+  add('X', 'https://twitter.com/intent/tweet?text=' + enc(full));
+  add('FACEBOOK', 'https://www.facebook.com/sharer/sharer.php?u=' + enc(info.url) + '&quote=' + enc(info.text));
+  add('WHATSAPP', 'https://wa.me/?text=' + enc(full));
+  add('TELEGRAM', 'https://t.me/share/url?url=' + enc(info.url) + '&text=' + enc(info.text));
+  add('LINKEDIN', 'https://www.linkedin.com/sharing/share-offsite/?url=' + enc(info.url));
+  add('REDDIT', 'https://www.reddit.com/submit?url=' + enc(info.url) + '&title=' + enc(info.text));
+  add('EMAIL', 'mailto:?subject=' + enc('Can you beat me on Local Surfer?') + '&body=' + enc(full));
+  const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'COPY'; cp.addEventListener('click', async () => { try { await navigator.clipboard.writeText(full); cp.textContent = 'COPIED'; } catch (e) { cp.textContent = 'COPY FAILED'; } }); row.appendChild(cp);
+  if (file) { const a = document.createElement('a'); a.textContent = 'SAVE IMAGE'; a.href = URL.createObjectURL(file); a.download = 'local-surfer.jpg'; row.appendChild(a); }
+  const msg = document.createElement('div'); msg.className = 'msg'; msg.textContent = full; row.appendChild(msg);
+}
+$('btnShare').addEventListener('click', () => { doShare().catch((e) => console.warn('[share]', e.message)); });
+window.indiShare = { shareInfo, shareImage, doShare };
 /* boards panel */
 function boardScopes() {
   const P = lb.place, out = [{ scope: 'world', key: null, label: 'WORLD' }];
@@ -2497,6 +2598,8 @@ async function boot() {
   try { const t = localStorage.getItem('indiswipeout.mly') || (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) || ''; if (t) $('mly').value = t; } catch (e) { /* ignore */ }
   if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) { $('mly').value = window.INDI_CONFIG.mapillaryToken; }
   const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) $('pc').value = qm.get('pc');
+  if (qm.get('at') && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(qm.get('at'))) { const [la, lo] = qm.get('at').split(',').map(Number); streetPlace = { lat: la, lon: lo, name: (qm.get('name') || 'the same street').slice(0, 40), query: '' }; $('pc').value = ''; }
+  if (qm.get('by') || qm.get('at')) { const by = (qm.get('by') || 'A friend').replace(/[<>&]/g, '').slice(0, 14), where = streetPlace ? streetPlace.name : ($('pc').value || 'their street'); setStreetStatus('<b>' + by + '</b> challenged you to beat their run in ' + where.replace(/[<>&]/g, '') + '. Tap GO.'); }
   setProgress(1, 'READY');
   $('loading').classList.add('off'); $('start').classList.add('on');
   requestAnimationFrame(frame);

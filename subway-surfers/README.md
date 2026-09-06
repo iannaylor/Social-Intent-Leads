@@ -49,14 +49,14 @@ points) and a red horseshoe MAGNET (ten seconds of coins pulled to you).
 
 ## Leaderboards
 
-After every run the wipeout card shows where the score lands: in your town (or
+After every run the end card shows where the score lands: in your town (or
 area), your county and the world, with a "this week" note when it is a top-ten
-weekly score. LEADERBOARDS on the start and wipeout cards opens the boards:
+weekly score. LEADERBOARDS on the start and end cards opens the boards:
 WORLD, UK (or your country), county, town and postcode area, all time or this
 week, best run per player. Street runs count on every board of the place you
 started from; tunnel runs count worldwide only.
 
-The first wipeout asks for a name (2 to 14 characters). Runs are tied to a
+The first run's end card asks for a name (2 to 14 characters). Runs are tied to a
 random key kept in the browser, so there is no sign-up. CHANGE NAME and REMOVE
 MY SCORES live in the boards panel.
 
@@ -71,6 +71,14 @@ access). To set it up, or move it to your own project:
    key is public by design.
 3. Places come from postcodes.io for UK runs and Google's geocoder elsewhere,
    both looked up once at street start.
+
+SHARE on the end card opens the phone's share sheet (or, on a desktop, links to
+X, Facebook, WhatsApp, Telegram, LinkedIn, Reddit and email, plus copy and a
+saved image) with your best position, a generated card image and a link that
+starts a friend on the same street (`?pc=` or `?at=lat,lon&name=`, with `?by=`
+naming who set the challenge). `share.jpg` is the link preview image, cropped
+from the poster artwork; `splash-land.jpg` and `splash-port.jpg` (and the `-s`
+phone sizes) are the loading splash and the backdrop of the start card.
 
 `submit_run` rejects runs that are faster than the game allows, score more than
 the distance and coins could earn, or arrive more than once every six seconds,

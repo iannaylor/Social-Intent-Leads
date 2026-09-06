@@ -88,7 +88,7 @@ create or replace function public.submit_run(
   p_country_code text default null, p_country text default null, p_county text default null, p_town text default null,
   p_area text default null, p_geohash5 text default null, p_build text default null)
 returns json language plpgsql security definer set search_path = public as $$
-declare v_player uuid; v_last timestamptz; v_today int; v_name text; v_out json;
+declare v_player uuid; v_last timestamptz; v_today int; v_name text; v_out json; v_best int;
 begin
   if p_device is null or char_length(p_device) < 16 or char_length(p_device) > 64 then raise exception 'bad device'; end if;
   v_name := left(btrim(regexp_replace(coalesce(p_name, ''), '[^A-Za-z0-9 _.\-]', '', 'g')), 14);
@@ -107,7 +107,15 @@ begin
   if v_today >= 300 then raise exception 'daily limit'; end if;
   insert into runs (player_id, mode, score, coins, distance_m, duration_s, country_code, country, county, town, area, geohash5, client_build)
   values (v_player, p_mode, p_score, p_coins, p_distance, p_duration, p_country_code, p_country, p_county, p_town, p_area, p_geohash5, p_build);
+  select max(score) into v_best from runs where player_id = v_player and not hidden;
   select json_build_object(
+    'v', 2, 'player', v_player,
+    -- the player's best run and where it stands, for sharing
+    'best', json_build_object('score', v_best,
+      'world', (select row_to_json(x) from rank_of('world', null, 'all', v_best, v_player) x),
+      'county', case when p_county is null then null else (select row_to_json(x) from rank_of('county', p_county, 'all', v_best, v_player) x) end,
+      'town',   case when p_town is null then null else (select row_to_json(x) from rank_of('town', p_town, 'all', v_best, v_player) x) end,
+      'area',   case when p_area is null then null else (select row_to_json(x) from rank_of('area', p_area, 'all', v_best, v_player) x) end),
     'world',   (select row_to_json(x) from rank_of('world', null, 'all', p_score, v_player) x),
     'country', case when p_country_code is null then null else (select row_to_json(x) from rank_of('country', p_country_code, 'all', p_score, v_player) x) end,
     'county',  case when p_county is null then null else (select row_to_json(x) from rank_of('county', p_county, 'all', p_score, v_player) x) end,
