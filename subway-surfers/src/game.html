@@ -16,6 +16,7 @@
 <meta name="twitter:title" content="Local Surfer">
 <meta name="twitter:description" content="Run down your own street, wrapped in real photos of it. Can you beat the best run in your town?">
 <meta name="twitter:image" content="https://localsurfer.app/share.jpg">
+<script src="https://saastoolkit.ai/saas-analytics-loader.js" data-tracking-id="69dd1fbe53699eaf3972cfc8cb18ba9a" async></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2730%27 fill=%27%23e8792b%27/%3E%3Ctext x=%2732%27 y=%2746%27 font-family=%27Impact,sans-serif%27 font-size=%2740%27 text-anchor=%27middle%27 fill=%27%23111%27%3EL%3C/text%3E%3C/svg%3E">
 <script>
 // Street mode configuration. A Mapillary access token (free, from mapillary.com/developer) can be
@@ -1772,9 +1773,10 @@ async function startStreet(place) {
       try { await loadGmaps(); cur = await gsvFindLinked(place.lat, place.lon); street.linked = true; }
       catch (e) { street.linked = false; console.warn('[street] linked lookup failed, probing instead:', e.message); }
       if (!cur) cur = await gsvFind(place.lat, place.lon);
-      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; setStreetStatus(cur.backedUp ? 'Street View found. Starting ' + cur.backedUp + ' m up the road so you run past the spot. Run!' : 'Street View found. Run!'); }
+      if (cur) { await gsvShow(cur, true); street.source = 'google'; street.nextSwapD = GSV_SWAP; track('street_found', { place: place.name, backed_up_m: cur.backedUp || 0, linked: !!street.linked }); setStreetStatus(cur.backedUp ? 'Street View found. Starting ' + cur.backedUp + ' m up the road so you run past the spot. Run!' : 'Street View found. Run!'); }
       else gerr = 'Google has no Street View within ' + GSV_RADIUS + ' m of ' + (place.name || 'here') + '.';
     } catch (e) { gerr = e.message; }
+    if (gerr) track('street_not_found', { place: place.name, reason: gerr.slice(0, 80) });
   }
   if (street.source !== 'google') {
     let panos = [];
@@ -2009,7 +2011,7 @@ function musicStop(fade) {
   clearInterval(music.timer); music.playing = false;
 }
 function musicToggle() {
-  music.on = !music.on; try { localStorage.setItem('indi.music', music.on ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  music.on = !music.on; track('music_toggled', { on: music.on }); try { localStorage.setItem('indi.music', music.on ? 'on' : 'off'); } catch (e) { /* ignore */ }
   const b = $('mute'); if (b) { b.textContent = music.on ? '♪' : '♪̸'; b.classList.toggle('off', !music.on); }
   if (!music.on) musicStop(0.1); else if (state.mode === 'run') musicStart('run');
 }
@@ -2061,7 +2063,7 @@ async function startRun(mode) {
     if (!streetPlace && !$('pc').value.trim()) { setStreetStatus('Type a postcode or address and GO, or use your location.', true); return; }
     $('btnStart').disabled = true; $('btnLoc').disabled = true;
     try {
-      if (!streetPlace || streetPlace.query !== $('pc').value.trim()) { setStreetStatus('Looking up ' + $('pc').value.trim() + '…'); streetPlace = Object.assign(await geocode($('pc').value.trim()), { query: $('pc').value.trim() }); }
+      if (!streetPlace || streetPlace.query !== $('pc').value.trim()) { setStreetStatus('Looking up ' + $('pc').value.trim() + '…'); streetPlace = Object.assign(await geocode($('pc').value.trim()), { query: $('pc').value.trim() }); track('postcode_entered', { place: streetPlace.name, area: (streetPlace.query.match(/^[A-Za-z]{1,2}\d[A-Za-z\d]?/) || [''])[0].toUpperCase() || undefined }); }
       if (!street.active || street.place !== streetPlace) { await startStreet(streetPlace); }
     } catch (e) {
       const blocked = /claude/.test(location.hostname) || (e && /Failed to fetch|NetworkError/.test(e.message || ''));
@@ -2074,6 +2076,7 @@ async function startRun(mode) {
 }
 function beginRun() {
   audioInit(); musicNodes(); resetWorld(); state.mode = 'run'; musicStart('run');
+  { const P = lb.place || {}; track('run_started', { mode: street.active && street.source ? 'street' : 'practice', town: P.town, county: P.county, country: P.country_code, music: music.on, view }); }
   if (street.active) { street.runStart = state.traveled; street.nextSwapD = street.source === 'google' ? GSV_SWAP : 260; state.spawnCursor = state.traveled + 110; }
   try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   $('start').classList.remove('on'); $('dead').classList.remove('on');
@@ -2084,7 +2087,9 @@ function die(cause) {
   if (state.mode !== 'run') return;
   state.mode = 'dead'; state.deathT = 0; state.hitFlash = 1; sfxHit(); sfxCrash(); musicStop(0.6);
   $('cause').textContent = cause;
-  if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
+  const newBest = state.score > state.best;
+  if (newBest) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
+  { const P = lb.place || {}; const ev = { mode: street.active && street.source ? 'street' : 'practice', score: Math.floor(state.score), coins: state.coins, distance_m: Math.round(state.traveled), duration_s: Math.round(state.time), cause, new_best: newBest, town: P.town }; track('run_ended', ev); if (newBest) track('high_score', { score: ev.score, town: P.town }); }
   $('dScore').firstChild.textContent = String(Math.floor(state.score)); $('dCoins').firstChild.textContent = String(state.coins); $('dBest').firstChild.textContent = String(state.best);
   updateHUD(); lbRecord();
   setTimeout(() => { if (state.mode === 'dead') $('dead').classList.add('on'); }, 900);
@@ -2094,6 +2099,19 @@ function die(cause) {
    Leaderboards (Supabase). World / country / county / town / area, best run per player.
    The client only ever calls RPC functions; tables are locked behind RLS (see supabase/schema.sql).
    ============================================================ */
+/* ---- analytics (SaaSToolkit). Anonymous: the player is the device key; traits are the chosen name and the town,
+   county and country they run in. Never coordinates, never an email. Calls queue until the loader is in, and are
+   dropped silently if it never loads (ad blockers, offline). */
+const anq = [];
+function anFlush() { const A = window.SaaSAnalytics; if (!A) return false; while (anq.length) { const [m, a, b] = anq.shift(); try { if (A[m]) A[m](a, b); } catch (e) { /* ignore */ } } return true; }
+function track(ev, props) { anq.push(['track', ev, props || {}]); anFlush(); }
+function identify() {
+  const P = lb.place || {}; const traits = { name: lb.name || undefined, town: P.town || undefined, county: P.county || undefined, country: P.country_code || undefined, best_score: state.best || undefined };
+  for (const k of Object.keys(traits)) if (traits[k] === undefined) delete traits[k];
+  anq.push(['identify', lb.device, traits]); anFlush();
+}
+{ let tries = 0; const t = setInterval(() => { if (anFlush() || ++tries > 60) clearInterval(t); }, 500); }
+setTimeout(() => { if (lb.name) identify(); }, 1500);
 const SB = () => ({ url: (window.INDI_CONFIG && window.INDI_CONFIG.supabaseUrl) || '', key: (window.INDI_CONFIG && window.INDI_CONFIG.supabaseKey) || '' });
 const lb = { place: null, placeKey: '', name: '', device: '', last: null, pending: null, scope: 'world', period: 'all', busy: false };
 try { lb.name = (localStorage.getItem('indi.name') || '').slice(0, 14); lb.device = localStorage.getItem('indi.device') || ''; } catch (e) { /* ignore */ }
@@ -2157,7 +2175,7 @@ function setRank(text, dim) {
     r.appendChild(d);
   }
 }
-function saveName(n) { n = (n || '').replace(/[^A-Za-z0-9 _.\-]/g, '').trim().slice(0, 14); if (n.length < 2) return false; lb.name = n; try { localStorage.setItem('indi.name', n); } catch (e) { /* ignore */ } return true; }
+function saveName(n) { n = (n || '').replace(/[^A-Za-z0-9 _.\-]/g, '').trim().slice(0, 14); if (n.length < 2) return false; const first = !lb.name; lb.name = n; try { localStorage.setItem('indi.name', n); } catch (e) { /* ignore */ } track(first ? 'name_saved' : 'name_changed', { name: n }); identify(); return true; }
 /* called from die(): submit the run, or ask for a name first */
 function lbRecord() {
   const run = { mode: street.active && street.source ? 'street' : 'tunnel', score: Math.floor(state.score), coins: state.coins, distance: Math.round(state.traveled), duration: Math.round(state.time * 10) / 10, place: street.active && street.source ? lb.place : null };
@@ -2175,6 +2193,7 @@ async function lbSubmit(run) {
     const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
     run.ranks = res; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
     if (res.player) lb.playerId = res.player; if (res.best) lb.best = res.best;
+    track('leaderboard_submitted', { score: run.score, rank_town: res.town && res.town.rank, rank_county: res.county && res.county.rank, rank_country: res.country && res.country.rank, rank_world: res.world && res.world.rank, town: P.town, county: P.county }); identify();
     if (!res.v) console.warn('[lb] the database is running an older submit_run: re-run supabase/schema.sql for ranks that leave out your own earlier runs');
   } catch (e) { console.warn('[lb] submit failed:', e.message); setRank(/implausible|too fast|daily/.test(e.message) ? 'RUN NOT COUNTED' : 'LEADERBOARD OFFLINE', true); }
   lb.busy = false;
@@ -2229,18 +2248,20 @@ async function shareImage(info) {
 }
 async function doShare() {
   const info = shareInfo(); const full = info.text + ' ' + info.url;
+  track('share_opened', { method: navigator.share ? 'sheet' : 'links', rank: info.rank && info.rank.rank, where: info.where, score: info.score });
   let file = null;
   try { const blob = await shareImage(info); if (blob) file = new File([blob], 'local-surfer.jpg', { type: 'image/jpeg' }); } catch (e) { file = null; }
   if (navigator.share) {
     try {
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url, files: [file] });
       else await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url });
+      track('share_completed', { method: 'sheet', with_image: !!file });
       return;
-    } catch (e) { if (e && e.name === 'AbortError') return; }
+    } catch (e) { if (e && e.name === 'AbortError') { track('share_cancelled', { method: 'sheet' }); return; } }
   }
   // no system share sheet (most desktops): links to the networks, copy, and the image
   const row = $('shareRow'); row.innerHTML = ''; row.hidden = false;
-  const enc = encodeURIComponent, add = (label, href) => { const a = document.createElement('a'); a.textContent = label; a.href = href; a.target = '_blank'; a.rel = 'noopener'; row.appendChild(a); };
+  const enc = encodeURIComponent, add = (label, href) => { const a = document.createElement('a'); a.textContent = label; a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.addEventListener('click', () => track('share_completed', { method: 'link', network: label.toLowerCase() })); row.appendChild(a); };
   add('X', 'https://twitter.com/intent/tweet?text=' + enc(full));
   add('FACEBOOK', 'https://www.facebook.com/sharer/sharer.php?u=' + enc(info.url) + '&quote=' + enc(info.text));
   add('WHATSAPP', 'https://wa.me/?text=' + enc(full));
@@ -2248,7 +2269,7 @@ async function doShare() {
   add('LINKEDIN', 'https://www.linkedin.com/sharing/share-offsite/?url=' + enc(info.url));
   add('REDDIT', 'https://www.reddit.com/submit?url=' + enc(info.url) + '&title=' + enc(info.text));
   add('EMAIL', 'mailto:?subject=' + enc('Can you beat me on Local Surfer?') + '&body=' + enc(full));
-  const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'COPY'; cp.addEventListener('click', async () => { try { await navigator.clipboard.writeText(full); cp.textContent = 'COPIED'; } catch (e) { cp.textContent = 'COPY FAILED'; } }); row.appendChild(cp);
+  const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'COPY'; cp.addEventListener('click', async () => { track('share_completed', { method: 'link', network: 'copy' }); try { await navigator.clipboard.writeText(full); cp.textContent = 'COPIED'; } catch (e) { cp.textContent = 'COPY FAILED'; } }); row.appendChild(cp);
   if (file) { const a = document.createElement('a'); a.textContent = 'SAVE IMAGE'; a.href = URL.createObjectURL(file); a.download = 'local-surfer.jpg'; row.appendChild(a); }
   const msg = document.createElement('div'); msg.className = 'msg'; msg.textContent = full; row.appendChild(msg);
 }
@@ -2267,6 +2288,7 @@ function boardScopes() {
 }
 let boardsFrom = 'start';
 function openBoards(scope) {
+  if (!$('boards').classList.contains('on')) track('leaderboard_opened', { from: $('dead').classList.contains('on') ? 'end_card' : 'start_card' });
   if (!$('boards').classList.contains('on')) boardsFrom = $('dead').classList.contains('on') ? 'dead' : 'start';
   const scopes = boardScopes(); if (scope && scopes.some((s) => s.scope === scope)) lb.scope = scope; else if (!scopes.some((s) => s.scope === lb.scope)) lb.scope = scopes[Math.min(scopes.length - 1, 3)].scope;
   const tabs = $('boardTabs'); tabs.innerHTML = '';
@@ -2304,6 +2326,7 @@ $('btnBoardName').addEventListener('click', () => { if (!saveName($('boardNameIn
 $('boardNameIn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); $('btnBoardName').click(); } });
 $('btnForget').addEventListener('click', async () => {
   if (!window.confirm('Remove every score recorded from this device?')) return;
+  track('scores_removed', {});
   try { await sbRpc('remove_my_runs', { p_device: lb.device }); lb.name = ''; try { localStorage.removeItem('indi.name'); } catch (e) { /* ignore */ } $('boardYou').textContent = 'YOUR SCORES HAVE BEEN REMOVED'; loadBoard(); }
   catch (e) { $('boardYou').textContent = 'COULD NOT REACH THE LEADERBOARD'; }
 });
@@ -2343,7 +2366,7 @@ if (!music.on) { $('mute').textContent = '♪̸'; $('mute').classList.add('off')
 $('btnTunnel').addEventListener('click', () => startRun('tunnel'));
 $('btnAgain').addEventListener('click', startRun);
 $('btnMenu').addEventListener('click', () => { musicStop(0.2); state.mode = 'idle'; $('dead').classList.remove('on'); $('hud').classList.remove('on'); $('best').classList.remove('on'); $('view').classList.remove('on'); $('start').classList.add('on'); });
-$('btnLoc').addEventListener('click', async () => { try { $('btnLoc').disabled = true; setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); $('pc').value = ''; $('btnLoc').disabled = false; startRun('street'); } catch (e) { $('btnLoc').disabled = false; setStreetStatus(e.message, true); } });
+$('btnLoc').addEventListener('click', async () => { track('location_requested', {}); try { $('btnLoc').disabled = true; setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); track('location_granted', {}); $('pc').value = ''; $('btnLoc').disabled = false; startRun('street'); } catch (e) { $('btnLoc').disabled = false; setStreetStatus(e.message, true); } });
 $('pc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startRun('street'); } e.stopPropagation(); });
 $('mly').addEventListener('keydown', (e) => e.stopPropagation());
 $('view').addEventListener('click', () => setView(view === 'fp' ? 'tp' : 'fp'));
@@ -2603,7 +2626,7 @@ async function boot() {
   if (window.INDI_CONFIG && window.INDI_CONFIG.mapillaryToken) { $('mly').value = window.INDI_CONFIG.mapillaryToken; }
   const qm = new URLSearchParams(location.search); if (qm.get('mly')) $('mly').value = qm.get('mly'); if (qm.get('pc')) $('pc').value = qm.get('pc');
   if (qm.get('at') && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(qm.get('at'))) { const [la, lo] = qm.get('at').split(',').map(Number); streetPlace = { lat: la, lon: lo, name: (qm.get('name') || 'the same street').slice(0, 40), query: '' }; $('pc').value = ''; }
-  if (qm.get('by') || qm.get('at')) { const by = (qm.get('by') || 'A friend').replace(/[<>&]/g, '').slice(0, 14), where = streetPlace ? streetPlace.name : ($('pc').value || 'their street'); setStreetStatus('<b>' + by + '</b> challenged you to beat their run in ' + where.replace(/[<>&]/g, '') + '. Tap GO.'); }
+  if (qm.get('by') || qm.get('at')) { const by = (qm.get('by') || 'A friend').replace(/[<>&]/g, '').slice(0, 14), where = streetPlace ? streetPlace.name : ($('pc').value || 'their street'); setStreetStatus('<b>' + by + '</b> challenged you to beat their run in ' + where.replace(/[<>&]/g, '') + '. Tap GO.'); track('challenge_link_opened', { by, place: where }); }
   setProgress(1, 'READY');
   $('loading').classList.add('off'); $('start').classList.add('on');
   requestAnimationFrame(frame);
