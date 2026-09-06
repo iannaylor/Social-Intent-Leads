@@ -1893,7 +1893,23 @@ function buildPost() {
    Audio (tiny synth, no assets)
    ============================================================ */
 let actx = null;
-function audioInit() { if (actx) return; try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } }
+/* Audio starts inside a user gesture. iPhones need two more things: the context resumed if it was suspended (a
+   background tab, or created before the first tap), and the page's audio session put in "playback" mode, otherwise
+   Web Audio is silenced by the ringer switch even though everything reports playing. */
+let audioUnlocked = false;
+function audioInit() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; return; } }
+  if (actx.state === 'suspended') { try { actx.resume().catch(() => {}); } catch (e) { /* ignore */ } }
+  if (audioUnlocked) return; audioUnlocked = true;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
+  try {
+    // a looping silent clip through a media element switches iOS to the playback category (unmute.js trick)
+    const a = document.createElement('audio'); a.setAttribute('playsinline', ''); a.loop = true; a.volume = 0.01;
+    a.src = 'data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQ4AAAAAAAAAAAAAAAAAAAAAAA==';
+    const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); window.__indiSilent = a;
+  } catch (e) { /* ignore */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && actx && actx.state === 'suspended') { try { actx.resume().catch(() => {}); } catch (e) { /* ignore */ } } });
 function beep(freq, dur, type, gain) {
   if (!actx) return;
   try { const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.value = freq; g.gain.setValueAtTime(gain || 0.08, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); } catch (e) { /* ignore */ }

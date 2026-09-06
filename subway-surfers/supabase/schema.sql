@@ -65,14 +65,16 @@ language sql security definer set search_path = public stable as $$
   limit greatest(1, least(coalesce(p_limit, 20), 100));
 $$;
 
--- where a score lands among players' best runs in a scope
-create or replace function public.rank_of(p_scope text, p_key text, p_period text, p_score int)
+-- where a score lands among players' best runs in a scope; p_exclude leaves out the player's own other runs, so a
+-- run ranks against everyone else rather than against the player's own best
+drop function if exists public.rank_of(text, text, text, int);
+create or replace function public.rank_of(p_scope text, p_key text, p_period text, p_score int, p_exclude uuid default null)
 returns table (rank int, total int)
 language sql security definer set search_path = public stable as $$
   with best as (
     select distinct on (r.player_id) r.player_id, r.score
     from runs r
-    where not r.hidden and r.created_at >= period_start(p_period)
+    where not r.hidden and r.created_at >= period_start(p_period) and (p_exclude is null or r.player_id <> p_exclude)
       and case p_scope when 'world' then true when 'country' then r.country_code = p_key when 'county' then r.county = p_key
                        when 'town' then r.town = p_key when 'area' then r.area = p_key else false end
     order by r.player_id, r.score desc
@@ -106,12 +108,12 @@ begin
   insert into runs (player_id, mode, score, coins, distance_m, duration_s, country_code, country, county, town, area, geohash5, client_build)
   values (v_player, p_mode, p_score, p_coins, p_distance, p_duration, p_country_code, p_country, p_county, p_town, p_area, p_geohash5, p_build);
   select json_build_object(
-    'world',   (select row_to_json(x) from rank_of('world', null, 'all', p_score) x),
-    'country', case when p_country_code is null then null else (select row_to_json(x) from rank_of('country', p_country_code, 'all', p_score) x) end,
-    'county',  case when p_county is null then null else (select row_to_json(x) from rank_of('county', p_county, 'all', p_score) x) end,
-    'town',    case when p_town is null then null else (select row_to_json(x) from rank_of('town', p_town, 'all', p_score) x) end,
-    'area',    case when p_area is null then null else (select row_to_json(x) from rank_of('area', p_area, 'all', p_score) x) end,
-    'week',    (select row_to_json(x) from rank_of('world', null, 'week', p_score) x)
+    'world',   (select row_to_json(x) from rank_of('world', null, 'all', p_score, v_player) x),
+    'country', case when p_country_code is null then null else (select row_to_json(x) from rank_of('country', p_country_code, 'all', p_score, v_player) x) end,
+    'county',  case when p_county is null then null else (select row_to_json(x) from rank_of('county', p_county, 'all', p_score, v_player) x) end,
+    'town',    case when p_town is null then null else (select row_to_json(x) from rank_of('town', p_town, 'all', p_score, v_player) x) end,
+    'area',    case when p_area is null then null else (select row_to_json(x) from rank_of('area', p_area, 'all', p_score, v_player) x) end,
+    'week',    (select row_to_json(x) from rank_of('world', null, 'week', p_score, v_player) x)
   ) into v_out;
   return v_out;
 end $$;
@@ -128,6 +130,6 @@ revoke all on function public.submit_run(text,text,text,int,int,int,real,text,te
 revoke all on function public.remove_my_runs(text) from public;
 grant execute on function public.period_start(text) to anon, authenticated;
 grant execute on function public.top_runs(text,text,text,int) to anon, authenticated;
-grant execute on function public.rank_of(text,text,text,int) to anon, authenticated;
+grant execute on function public.rank_of(text,text,text,int,uuid) to anon, authenticated;
 grant execute on function public.submit_run(text,text,text,int,int,int,real,text,text,text,text,text,text,text) to anon, authenticated;
 grant execute on function public.remove_my_runs(text) to anon, authenticated;
