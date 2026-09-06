@@ -1929,15 +1929,16 @@ function audioInit() {
   if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; return; } }
   if (actx.state === 'suspended') { try { actx.resume().catch(() => {}); } catch (e) { /* ignore */ } }
   if (audioUnlocked) return; audioUnlocked = true;
+  // iOS 17+: play through the ringer switch. No media element is used, so the page never appears as a Now
+  // Playing item on the lock screen and never keeps playing in the background.
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
-  try {
-    // a looping silent clip through a media element switches iOS to the playback category (unmute.js trick)
-    const a = document.createElement('audio'); a.setAttribute('playsinline', ''); a.loop = true; a.volume = 0.01;
-    a.src = 'data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQ4AAAAAAAAAAAAAAAAAAAAAAA==';
-    const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); window.__indiSilent = a;
-  } catch (e) { /* ignore */ }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && actx && actx.state === 'suspended') { try { actx.resume().catch(() => {}); } catch (e) { /* ignore */ } } });
+/* sound only while the page is in front: leaving the tab or locking the phone silences everything at once */
+document.addEventListener('visibilitychange', () => {
+  if (!actx) return;
+  try { if (document.hidden) { musicStop(0.05); actx.suspend().catch(() => {}); } else if (actx.state === 'suspended') actx.resume().catch(() => {}); } catch (e) { /* ignore */ }
+});
+window.addEventListener('pagehide', () => { try { musicStop(0.05); if (actx) actx.suspend().catch(() => {}); } catch (e) { /* ignore */ } });
 function beep(freq, dur, type, gain) {
   if (!actx) return;
   try { const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.value = freq; g.gain.setValueAtTime(gain || 0.08, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); } catch (e) { /* ignore */ }
@@ -1996,7 +1997,7 @@ function musicTick() {
   while (music.nextStep < actx.currentTime + 0.2) { scheduleStep(music.step, music.nextStep); music.nextStep += 60 / music.bpm / 4; music.step++; }
 }
 function musicStart(mode) {
-  if (!actx || !music.on) return;
+  if (!actx || !music.on || mode !== 'run') return;
   musicNodes(); music.mode = mode;
   if (!music.playing) { music.playing = true; music.nextStep = actx.currentTime + 0.05; music.step = mode === 'run' ? 64 : 0; music.timer = setInterval(musicTick, 30); }
   music.bus.gain.cancelScheduledValues(actx.currentTime); music.bus.gain.setTargetAtTime(mode === 'run' ? 0.34 : 0.14, actx.currentTime, 0.4);
@@ -2010,7 +2011,7 @@ function musicStop(fade) {
 function musicToggle() {
   music.on = !music.on; try { localStorage.setItem('indi.music', music.on ? 'on' : 'off'); } catch (e) { /* ignore */ }
   const b = $('mute'); if (b) { b.textContent = music.on ? '♪' : '♪̸'; b.classList.toggle('off', !music.on); }
-  if (!music.on) musicStop(0.1); else if (state.mode === 'run') musicStart('run'); else musicStart('idle');
+  if (!music.on) musicStop(0.1); else if (state.mode === 'run') musicStart('run');
 }
 /* extra effects */
 const sfxSwish = () => { if (!actx || !music.noise) return; noiseHit(actx.currentTime, 0.12, 0.35, 'bandpass', 1200, 0.5); };
@@ -2081,7 +2082,7 @@ function beginRun() {
 }
 function die(cause) {
   if (state.mode !== 'run') return;
-  state.mode = 'dead'; state.deathT = 0; state.hitFlash = 1; sfxHit(); sfxCrash(); musicStop(0.6); setTimeout(() => { if (state.mode === 'dead') musicStart('idle'); }, 1200);
+  state.mode = 'dead'; state.deathT = 0; state.hitFlash = 1; sfxHit(); sfxCrash(); musicStop(0.6);
   $('cause').textContent = cause;
   if (state.score > state.best) { state.best = Math.floor(state.score); try { localStorage.setItem('indiswipeout.best', String(state.best)); } catch (e) { /* ignore */ } }
   $('dScore').firstChild.textContent = String(Math.floor(state.score)); $('dCoins').firstChild.textContent = String(state.coins); $('dBest').firstChild.textContent = String(state.best);
@@ -2341,7 +2342,7 @@ $('mute').addEventListener('click', () => { audioInit(); musicToggle(); });
 if (!music.on) { $('mute').textContent = '♪̸'; $('mute').classList.add('off'); }
 $('btnTunnel').addEventListener('click', () => startRun('tunnel'));
 $('btnAgain').addEventListener('click', startRun);
-$('btnMenu').addEventListener('click', () => { musicStart('idle'); state.mode = 'idle'; $('dead').classList.remove('on'); $('hud').classList.remove('on'); $('best').classList.remove('on'); $('view').classList.remove('on'); $('start').classList.add('on'); });
+$('btnMenu').addEventListener('click', () => { musicStop(0.2); state.mode = 'idle'; $('dead').classList.remove('on'); $('hud').classList.remove('on'); $('best').classList.remove('on'); $('view').classList.remove('on'); $('start').classList.add('on'); });
 $('btnLoc').addEventListener('click', async () => { try { $('btnLoc').disabled = true; setStreetStatus('Getting your location…'); streetPlace = Object.assign(await geolocate(), { query: '' }); $('pc').value = ''; $('btnLoc').disabled = false; startRun('street'); } catch (e) { $('btnLoc').disabled = false; setStreetStatus(e.message, true); } });
 $('pc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startRun('street'); } e.stopPropagation(); });
 $('mly').addEventListener('keydown', (e) => e.stopPropagation());
