@@ -2227,7 +2227,8 @@ function shareInfo() {
   if (lb.name) url.searchParams.set('by', lb.name);
   const rankText = r ? ordinalLower(r.rank) + ' in ' + where : null;
   const text = (rankText ? "I'm " + rankText + ' on Local Surfer with ' + score.toLocaleString('en-GB') + ' points.' : 'I scored ' + score.toLocaleString('en-GB') + ' on Local Surfer.') + ' Can you beat me' + (P && P.town ? ' on the same street' : ' on your own street') + '?';
-  return { text, url: url.toString(), score, rankText: rankText ? rankText.toUpperCase() : null, where, rank: r };
+  const place = (P && (P.town || P.area || P.county)) || (street.place && street.place.name && street.place.name !== 'your location' ? street.place.name : null);
+  return { text, url: url.toString(), score, rankText: rankText ? rankText.toUpperCase() : null, where, rank: r, place, name: lb.name || '' };
 }
 async function shareImage(info) {
   const W = 1080, H = 1080, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
@@ -2244,14 +2245,22 @@ async function shareImage(info) {
     g.fillStyle = '#f2eee6'; g.font = '110px ' + D; g.fillText('LOCAL SURFER', W / 2, 250);
     g.fillStyle = '#a9a49a'; g.font = '34px ' + D; g.fillText('Y O U R   S T R E E T   ·   Y O U R   R U N', W / 2, 330);
   }
-  for (let x = 0; x < W; x += 60) { g.fillStyle = '#e8792b'; g.fillRect(x, H - 14, 48, 14); g.fillStyle = '#1a1a1a'; g.fillRect(x + 48, H - 14, 12, 14); }
+  // Instagram and the like keep only the picture, so everything a friend needs is painted on: who, where, the
+  // score, the challenge and a big address
+  const placeText = info.place ? info.place.toUpperCase() : null;
   if (info.rank) {
-    g.fillStyle = '#f2eee6'; g.font = '230px ' + D; g.fillText(ordinal(info.rank.rank), W / 2, 700);
-    g.fillStyle = '#e0a83a'; g.font = '60px ' + D; g.fillText('IN ' + info.where.toUpperCase(), W / 2, 830);
-  } else { g.fillStyle = '#f2eee6'; g.font = '120px ' + D; g.fillText('MY RUN', W / 2, 720); }
-  g.fillStyle = '#f2eee6'; g.font = '600 60px ' + M; g.fillText(info.score.toLocaleString('en-GB') + ' PTS', W / 2, 915);
-  g.fillStyle = '#ffb060'; g.font = '60px ' + D; g.fillText('CAN YOU BEAT ME?', W / 2, 985);
-  g.fillStyle = '#a9a49a'; g.font = '30px ' + D; g.fillText('L O C A L S U R F E R . A P P', W / 2, 1042);
+    g.fillStyle = '#f2eee6'; g.font = '210px ' + D; g.fillText(ordinal(info.rank.rank), W / 2, 675);
+    g.fillStyle = '#e0a83a'; g.font = '60px ' + D; g.fillText('IN ' + (info.where === 'the world' ? 'THE WORLD' + (placeText ? ' · FROM ' + placeText : '') : info.where.toUpperCase()), W / 2, 795);
+  } else {
+    const who = info.name ? info.name.toUpperCase() + (/S$/i.test(info.name) ? '’ RUN' : '’S RUN') : 'MY RUN';
+    g.fillStyle = '#f2eee6'; g.font = '120px ' + D; g.fillText(who, W / 2, 680);
+    if (placeText) { g.fillStyle = '#e0a83a'; g.font = '60px ' + D; g.fillText(placeText, W / 2, 780); }
+  }
+  g.fillStyle = '#f2eee6'; g.font = '600 62px ' + M; g.fillText(info.score.toLocaleString('en-GB') + ' PTS', W / 2, 875);
+  g.fillStyle = '#ffb060'; g.font = '62px ' + D; g.fillText('CAN YOU BEAT ME?', W / 2, 945);
+  g.fillStyle = '#e8792b'; g.fillRect(0, 990, W, 90);
+  g.fillStyle = '#111'; g.font = '70px ' + D; try { g.letterSpacing = '6px'; } catch (e) { /* older canvas */ }
+  g.fillText('LOCALSURFER.APP', W / 2, 1036); try { g.letterSpacing = '0px'; } catch (e) { /* ignore */ }
   return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.86));
 }
 async function doShare() {
@@ -2260,10 +2269,13 @@ async function doShare() {
   let file = null;
   try { const blob = await shareImage(info); if (blob) file = new File([blob], 'local-surfer.jpg', { type: 'image/jpeg' }); } catch (e) { file = null; }
   if (navigator.share) {
+    // some apps (Instagram) take the picture and drop the words, so the caption goes on the clipboard too
+    let copied = false; try { await navigator.clipboard.writeText(full); copied = true; } catch (e) { copied = false; }
     try {
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url, files: [file] });
       else await navigator.share({ title: 'Local Surfer', text: info.text, url: info.url });
       track('share_completed', { method: 'sheet', with_image: !!file });
+      if (copied) { const row = $('shareRow'); row.innerHTML = ''; row.hidden = false; const msg = document.createElement('div'); msg.className = 'msg'; msg.textContent = 'Caption and link copied. If the app kept only the picture, paste them in.'; row.appendChild(msg); }
       return;
     } catch (e) { if (e && e.name === 'AbortError') { track('share_cancelled', { method: 'sheet' }); return; } }
   }
