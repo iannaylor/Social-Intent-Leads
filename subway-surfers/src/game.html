@@ -181,7 +181,7 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
       <li><b>✦ WINGS</b>Glowing orange wings: float higher over the cars, double points.</li>
       <li><b>∩ MAGNET</b>The red horseshoe: coins come to you.</li>
     </ul>
-    <button class="ghost" id="btnTunnel" type="button">OR RUN THE TUNNEL INSTEAD</button>
+    <button class="ghost" id="btnTunnel" type="button">OR PRACTICE IN THE TUNNEL</button>
     <div class="links"><button type="button" id="btnBoards0">LEADERBOARDS</button></div>
   </div>
 </div>
@@ -254,7 +254,8 @@ const VAULT_RX = 6.6, VAULT_RY = 4.3, VAULT_CY = 1.3;          // elliptical vau
 const WALL_X = VAULT_RX;
 const GRAVITY = 27, JUMP_V = 9.9;
 const ROLL_TIME = 0.72;
-const START_SPEED = 13, MAX_SPEED = 31, ACCEL = 0.24;
+const START_SPEED = 13, MAX_SPEED = 31, ACCEL = 0.24;   // MAX_SPEED is where the hazards are at full density (about 75 s in)
+const TOP_SPEED = 46, ACCEL_LATE = 0.06;                  // beyond that the pace keeps creeping up for another four minutes or so
 const TRAIN_W = 2.4, TRAIN_BODY_H = 2.6, TRAIN_LIFT = 0.6, TRAIN_TOP = TRAIN_LIFT + TRAIN_BODY_H; // 3.2
 const RAMP_LEN = 7.5;
 const SPAWN_AHEAD = 170;
@@ -2160,6 +2161,8 @@ function saveName(n) { n = (n || '').replace(/[^A-Za-z0-9 _.\-]/g, '').trim().sl
 function lbRecord() {
   const run = { mode: street.active && street.source ? 'street' : 'tunnel', score: Math.floor(state.score), coins: state.coins, distance: Math.round(state.traveled), duration: Math.round(state.time * 10) / 10, place: street.active && street.source ? lb.place : null };
   lb.last = run; setRank('');
+  $('btnShare').hidden = run.mode !== 'street';
+  if (run.mode !== 'street') { $('nameRow').hidden = true; setRank('PRACTICE RUN · STREET RUNS GO ON THE BOARDS', true); return; }
   if (!SB().url || run.score <= 0 || run.duration < 1) { $('nameRow').hidden = true; return; }
   if (!lb.name) { $('nameRow').hidden = false; $('nameIn').value = ''; setRank('ENTER A NAME TO JOIN THE LEADERBOARD', true); return; }
   $('nameRow').hidden = true; lbSubmit(run);
@@ -2384,7 +2387,7 @@ function checkBarriers(x, y, h) {
 function update(dt) {
   const run = state.mode === 'run';
   if (state.mode === 'dead') { state.deathT += dt; state.speed = Math.max(0, state.speed - dt * 45); state.hitFlash = Math.max(0, state.hitFlash - dt * 1.4); }
-  if (run) { state.time += dt; state.speed = Math.min(MAX_SPEED, state.speed + ACCEL * dt); }
+  if (run) { state.time += dt; state.speed = state.speed < MAX_SPEED ? Math.min(MAX_SPEED, state.speed + ACCEL * dt) : Math.min(TOP_SPEED, state.speed + ACCEL_LATE * dt); }
   const speed = state.mode === 'idle' ? 5 : state.speed;
   const dz = speed * dt;
   state.traveled += dz;

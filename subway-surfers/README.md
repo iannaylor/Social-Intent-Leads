@@ -53,8 +53,8 @@ After every run the end card shows where the score lands: in your town (or
 area), your county and the world, with a "this week" note when it is a top-ten
 weekly score. LEADERBOARDS on the start and end cards opens the boards:
 WORLD, UK (or your country), county, town and postcode area, all time or this
-week, best run per player. Street runs count on every board of the place you
-started from; tunnel runs count worldwide only.
+week, best run per player. Only street runs are recorded, on every board of the place you started from.
+The tunnel is for practice and never reaches the boards.
 
 The first run's end card asks for a name (2 to 14 characters). Runs are tied to a
 random key kept in the browser, so there is no sign-up. CHANGE NAME and REMOVE
@@ -80,7 +80,7 @@ naming who set the challenge). `share.jpg` is the link preview image, cropped
 from the poster artwork; `splash-land.jpg` and `splash-port.jpg` (and the `-s`
 phone sizes) are the loading splash and the backdrop of the start card.
 
-`submit_run` rejects runs that are faster than the game allows, score more than
+`submit_run` rejects practice (tunnel) runs and runs that are faster than the game allows, score more than
 the distance and coins could earn, or arrive more than once every six seconds,
 and caps a device at 300 runs a day.
 

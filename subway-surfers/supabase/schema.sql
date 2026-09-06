@@ -97,8 +97,9 @@ begin
   insert into players (device_key, name) values (p_device, v_name)
     on conflict (device_key) do update set name = excluded.name
     returning id into v_player;
-  -- plausibility: top speed is 31 m/s; score cannot exceed 4.5 x distance + 60 x coins + 500
-  if p_duration < 1 or p_distance > p_duration * 31 + 30 or p_score > p_distance * 4.5 + p_coins * 60 + 500 or p_coins > p_distance then
+  if p_mode <> 'street' then raise exception 'practice runs are not recorded'; end if;
+  -- plausibility: top speed is 46 m/s; score cannot exceed 5.2 x distance + 60 x coins + 500
+  if p_duration < 1 or p_distance > p_duration * 46 + 30 or p_score > p_distance * 5.2 + p_coins * 60 + 500 or p_coins > p_distance then
     raise exception 'implausible run';
   end if;
   select max(created_at) into v_last from runs where player_id = v_player;
