@@ -91,6 +91,16 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   #dead .rank.dim{color:var(--ink-dim)}
   [hidden]{display:none!important}
   #boards h1{font-size:44px}
+  .claim{border:2px solid var(--sodium);background:linear-gradient(180deg,#22160c,#160f08);padding:14px 14px 14px;margin:-4px 0 16px;box-shadow:0 0 24px rgba(232,121,43,.25)}
+  .claim .t{font-family:var(--display);font-size:22px;letter-spacing:.14em;color:#ffb060;line-height:1}
+  .claim .s{font-size:13px;line-height:1.45;color:#d6d0c4;margin:6px 0 10px}
+  .claim .row{display:flex;gap:8px;justify-content:center}
+  .claim input{flex:1;min-width:0;max-width:220px;font-family:var(--mono);font-size:18px;color:var(--ink);background:#15181b;border:1px solid var(--plate-edge);padding:9px 10px}
+  .claim input:focus{outline:2px solid var(--sodium);outline-offset:1px}
+  .claim button{font-size:19px;padding:10px 16px 8px;letter-spacing:.12em;background:var(--sodium);color:#111;box-shadow:0 3px 0 #7a3d12;flex:none}
+  .claim button:hover{background:#ff8d3a}
+  .claim.shake{animation:claimShake .5s}
+  @keyframes claimShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
   .namerow{display:flex;gap:8px;align-items:center;justify-content:center;margin:-6px 0 16px}
   .namerow input{width:150px;font-family:var(--mono);font-size:17px;color:var(--ink);background:#15181b;border:1px solid var(--plate-edge);padding:7px 9px;text-transform:none}
   .namerow input:focus{outline:2px solid var(--sodium);outline-offset:1px}
@@ -207,7 +217,11 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
       <div id="dBest">0<span>BEST</span></div>
     </div>
     <div class="rank" id="rank"></div>
-    <div class="namerow" id="nameRow" hidden><span class="lbl">YOUR NAME</span><input type="text" id="nameIn" maxlength="14" placeholder="Runner" autocomplete="nickname" enterkeyhint="done"><button type="button" id="btnName">SAVE</button></div>
+    <div class="claim" id="nameRow" hidden>
+      <div class="t">PUT YOUR NAME ON THE BOARD</div>
+      <div class="s">Your run only counts once it has a name. Two to fourteen letters, no sign-up, and it is on the boards for good.</div>
+      <div class="row"><input type="text" id="nameIn" maxlength="14" placeholder="Your name" autocomplete="nickname" enterkeyhint="done"><button type="button" id="btnName">RANK ME</button></div>
+    </div>
     <button id="btnAgain">RUN AGAIN</button>
     <div class="links"><button type="button" id="btnShare" class="share">SHARE · CAN YOU BEAT ME?</button></div>
     <div class="sharerow" id="shareRow" hidden></div>
@@ -2191,7 +2205,7 @@ function lbRecord() {
   $('btnShare').hidden = run.mode !== 'street';
   if (run.mode !== 'street') { $('nameRow').hidden = true; setRank('PRACTICE RUN · STREET RUNS GO ON THE BOARDS', true); return; }
   if (!SB().url || run.score <= 0 || run.duration < 1) { $('nameRow').hidden = true; return; }
-  if (!lb.name) { $('nameRow').hidden = false; $('nameIn').value = ''; setRank('ENTER A NAME TO JOIN THE LEADERBOARD', true); return; }
+  if (!lb.name) { $('nameRow').hidden = false; $('nameRow').classList.remove('shake'); $('nameIn').value = ''; setRank(''); run.unsubmitted = true; return; }
   $('nameRow').hidden = true; lbSubmit(run);
 }
 async function lbSubmit(run) {
@@ -2199,7 +2213,8 @@ async function lbSubmit(run) {
   const P = run.place || {};
   try {
     const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
-    run.ranks = res; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
+    run.ranks = res; run.unsubmitted = false; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
+    if (lb.shareAfterName) { lb.shareAfterName = false; lb.busy = false; doShare().catch(() => {}); }
     if (res.player) lb.playerId = res.player; if (res.best) lb.best = res.best;
     track('leaderboard_submitted', { score: run.score, rank_town: res.town && res.town.rank, rank_county: res.county && res.county.rank, rank_country: res.country && res.country.rank, rank_world: res.world && res.world.rank, town: P.town, county: P.county }); identify();
     if (!res.v) console.warn('[lb] the database is running an older submit_run: re-run supabase/schema.sql for ranks that leave out your own earlier runs');
@@ -2264,6 +2279,14 @@ async function shareImage(info) {
   return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.86));
 }
 async function doShare() {
+  // a share carries the player's name and rank, so a street run has to be on the board first: ask for the name
+  // (the panel is already on the card), then share the moment the run is ranked
+  if (lb.last && lb.last.mode === 'street' && !lb.name && SB().url) {
+    lb.shareAfterName = true; const p = $('nameRow'); p.hidden = false; p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake');
+    try { $('nameIn').focus(); } catch (e) { /* ignore */ }
+    track('share_needs_name', {}); return;
+  }
+  for (let i = 0; i < 50 && lb.busy; i++) await new Promise((r) => setTimeout(r, 100));   // let a submission in flight finish so the rank is on the card
   const info = shareInfo(); const full = info.text + ' ' + info.url;
   track('share_opened', { method: navigator.share ? 'sheet' : 'links', rank: info.rank && info.rank.rank, where: info.where, score: info.score });
   let file = null;
@@ -2342,7 +2365,7 @@ $('btnBoards0').addEventListener('click', () => openBoards());
 $('btnBoardsClose').addEventListener('click', closeBoards);
 for (const b of document.querySelectorAll('#boards .period button')) b.addEventListener('click', () => { lb.period = b.dataset.period; openBoards(lb.scope); });
 $('btnRename').addEventListener('click', () => { $('boardNameRow').hidden = false; $('boardNameIn').value = lb.name; $('boardNameIn').focus(); });
-$('btnBoardName').addEventListener('click', () => { if (!saveName($('boardNameIn').value)) { $('boardNameIn').focus(); return; } $('boardNameRow').hidden = true; $('boardYou').innerHTML = 'YOU ARE <b>' + lb.name.replace(/[<>&]/g, '') + '</b> · SHOWS ON YOUR NEXT RUN'; });
+$('btnBoardName').addEventListener('click', () => { if (!saveName($('boardNameIn').value)) { $('boardNameIn').focus(); return; } $('boardNameRow').hidden = true; $('boardYou').innerHTML = 'YOU ARE <b>' + lb.name.replace(/[<>&]/g, '') + '</b> · SHOWS ON YOUR NEXT RUN'; if (lb.last && lb.last.unsubmitted && lb.last.mode === 'street') { $('nameRow').hidden = true; lbSubmit(lb.last).then(() => loadBoard()); } });
 $('boardNameIn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); $('btnBoardName').click(); } });
 $('btnForget').addEventListener('click', async () => {
   if (!window.confirm('Remove every score recorded from this device?')) return;
