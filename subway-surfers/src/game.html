@@ -113,7 +113,10 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   /* the artwork is the splash and the backdrop to the start card: landscape on wide screens, portrait on phones */
   #loading{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:flex-end;padding-bottom:max(9vh,calc(env(safe-area-inset-bottom) + 40px));box-sizing:border-box;font-family:var(--display);font-size:18px;letter-spacing:.3em;color:var(--ink);text-shadow:0 2px 8px #000,0 0 18px #000;background:#0b0c0e url(splash-land.jpg) center/cover no-repeat;transition:opacity .5s}
   #start{background:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-land.jpg) center/cover no-repeat}
-  #start .card{background:linear-gradient(180deg,rgba(23,25,28,.9),rgba(11,12,14,.94));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  #start .card{background:linear-gradient(180deg,rgba(23,25,28,.9),rgba(11,12,14,.94));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding-top:26px}
+  /* the artwork carries the name: in portrait the card sits below the logo, in landscape it sits to the right of it */
+  @media (orientation:portrait){#start{align-items:flex-start}#start .card{margin:31vh auto 16px}}
+  @media (orientation:landscape) and (min-width:900px){#start .card{margin:auto 2vw auto auto;width:min(460px,31vw)}}
   @media (orientation:portrait){#loading{background-image:url(splash-port.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-port.jpg)}}
   @media (orientation:portrait) and (max-width:700px){#loading{background-image:url(splash-port-s.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-port-s.jpg)}}
   @media (orientation:landscape) and (max-width:900px){#loading{background-image:url(splash-land-s.jpg)}#start{background-image:linear-gradient(rgba(0,0,0,.12),rgba(0,0,0,.42)),url(splash-land-s.jpg)}}
@@ -166,9 +169,6 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
 
 <div id="start" class="overlay">
   <div class="card">
-    <div class="bullet">L</div>
-    <h1>LOCAL SURFER</h1>
-    <div class="sub">YOUR STREET · YOUR RUN</div>
     <div class="street" id="streetBox">
       <div class="row"><input type="text" id="pc" placeholder="Your postcode or address" autocomplete="postal-code" enterkeyhint="go"><button class="small" id="btnStart" type="button">GO</button></div>
       <button class="wide" id="btnLoc" type="button">USE MY LOCATION</button>
