@@ -64,7 +64,9 @@ window.INDI_CONFIG = { mapillaryToken: 'MLY|28442552942045624|503cc3ec808760dfa5
   button:active{transform:translateY(3px);box-shadow:0 1px 0 #6f6a61}
   button:focus-visible{outline:3px solid var(--sodium);outline-offset:3px}
   #dead .cause{font-family:var(--display);font-size:16px;letter-spacing:.2em;color:var(--danger);margin:-2px 0 14px}
-  #dead .rank{font-family:var(--display);font-size:17px;letter-spacing:.16em;color:var(--gold);margin:-8px 0 16px;min-height:1.2em;line-height:1.35;text-wrap:balance}
+  #dead .rank{font-family:var(--display);font-size:17px;letter-spacing:.16em;color:var(--gold);margin:-8px 0 16px;min-height:1.2em;line-height:1.5}
+  #dead .rank div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dead .rank b{font-weight:400;font-size:21px;color:var(--ink);margin-right:2px}
   #dead .rank.dim{color:var(--ink-dim)}
   [hidden]{display:none!important}
   #boards h1{font-size:44px}
@@ -2043,9 +2045,17 @@ function rankLine(res) {
   if (P) { if (P.town) add(res.town, P.town); else if (P.area) add(res.area, P.area); if (P.county && P.county !== P.town) add(res.county, P.county); }
   add(res.world, 'the world');
   if (res.week && res.week.rank && res.week.rank <= 10 && res.world && res.world.rank > 10) parts.push(ordinal(res.week.rank) + ' THIS WEEK');
-  return parts.slice(0, 4).join(' · ');
+  return parts.slice(0, 4);
 }
-function setRank(text, dim) { const r = $('rank'); r.textContent = text; r.classList.toggle('dim', !!dim); }
+/* one row per board: the position in bold, then where */
+function setRank(text, dim) {
+  const r = $('rank'); r.textContent = ''; r.classList.toggle('dim', !!dim);
+  for (const line of Array.isArray(text) ? text : (text ? [text] : [])) {
+    const d = document.createElement('div'); const m = /^(\S+)\s+(.*)$/.exec(line);
+    if (m && !dim) { const b = document.createElement('b'); b.textContent = m[1]; d.append(b, ' ' + m[2]); } else d.textContent = line;
+    r.appendChild(d);
+  }
+}
 function saveName(n) { n = (n || '').replace(/[^A-Za-z0-9 _.\-]/g, '').trim().slice(0, 14); if (n.length < 2) return false; lb.name = n; try { localStorage.setItem('indi.name', n); } catch (e) { /* ignore */ } return true; }
 /* called from die(): submit the run, or ask for a name first */
 function lbRecord() {
@@ -2060,7 +2070,7 @@ async function lbSubmit(run) {
   const P = run.place || {};
   try {
     const res = await sbRpc('submit_run', { p_device: lb.device, p_name: lb.name, p_mode: run.mode, p_score: run.score, p_coins: run.coins, p_distance: run.distance, p_duration: run.duration, p_country_code: P.country_code || null, p_country: P.country || null, p_county: P.county || null, p_town: P.town || null, p_area: P.area || null, p_geohash5: P.geohash5 || null, p_build: String(window.BUILD || 'dev').slice(0, 40) });
-    run.ranks = res; setRank(rankLine(res) || 'ON THE BOARD');
+    run.ranks = res; const lines = rankLine(res); setRank(lines.length ? lines : 'ON THE BOARD');
   } catch (e) { console.warn('[lb] submit failed:', e.message); setRank(/implausible|too fast|daily/.test(e.message) ? 'RUN NOT COUNTED' : 'LEADERBOARD OFFLINE', true); }
   lb.busy = false;
 }
